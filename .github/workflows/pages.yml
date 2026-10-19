@@ -23,6 +23,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/configure-pages@v5
+        with:
+          enablement: true
       - name: Write public Castalia auth configuration
         env:
           SUPABASE_URL: ${{ vars.SUPABASE_URL }}
