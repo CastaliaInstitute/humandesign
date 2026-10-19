@@ -6,6 +6,9 @@ const loginButton = document.querySelector('#signIn');
 const logoutButton = document.querySelector('#signOut');
 const personA = document.querySelector('#personA');
 const personB = document.querySelector('#personB');
+const birthDetails = document.querySelector('#birthDetails');
+const birthDetailsButton = document.querySelector('#toggleBirthDetails');
+const authPanel = document.querySelector('#authPanel');
 const names = { daniel: 'Person 1', camille: 'Person 2' };
 window.hdChartNames = names;
 function status(message) { statusNode.textContent = message; }
@@ -59,14 +62,42 @@ function formatTime(raw) {
   if (hour > 23 || minute > 59) return null;
   return { hour, minute };
 }
+function inputTime(raw) {
+  const parsed = formatTime(raw);
+  return parsed ? `${String(parsed.hour).padStart(2, '0')}:${String(parsed.minute).padStart(2, '0')}` : '';
+}
+function offsetForLocalTime(date, time, timeZone) {
+  const [year, month, day] = date.split('-').map(Number);
+  const { hour, minute } = time;
+  const target = Date.UTC(year, month - 1, day, hour, minute);
+  const formatter = new Intl.DateTimeFormat('en-US', {
+    timeZone, year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', hourCycle: 'h23'
+  });
+  let instant = target;
+  let parts;
+  for (let attempt = 0; attempt < 4; attempt++) {
+    parts = Object.fromEntries(formatter.formatToParts(new Date(instant)).map(part => [part.type, part.value]));
+    const represented = Date.UTC(+parts.year, +parts.month - 1, +parts.day, +parts.hour, +parts.minute);
+    const correction = target - represented;
+    instant += correction;
+    if (correction === 0) break;
+  }
+  parts = Object.fromEntries(formatter.formatToParts(new Date(instant)).map(part => [part.type, part.value]));
+  const represented = Date.UTC(+parts.year, +parts.month - 1, +parts.day, +parts.hour, +parts.minute);
+  if (represented !== target) throw new Error(`That local time does not exist in ${timeZone}, likely due to a daylight-saving transition.`);
+  return (target - instant) / 1000;
+}
 function epochFor(profile) {
   const date = String(profile.birth_date).slice(0, 10);
   const time = formatTime(profile.birth_time);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !time) throw new Error(`${profile.name || 'Profile'} needs a known birth date and time.`);
-  if (profile.birth_time_status && !/exact|recorded|confirmed/i.test(profile.birth_time_status)) {
+  if (!/exact|recorded|confirmed/i.test(profile.birth_time_status || '')) {
     throw new Error(`${profile.name || 'Profile'} birth time is marked “${profile.birth_time_status}”; exact gate calculations require a verified time.`);
   }
-  const offset = Number(profile.utc_offset_sec);
+  const offset = profile.timezone
+    ? offsetForLocalTime(date, time, profile.timezone)
+    : Number(profile.utc_offset_sec);
   if (!Number.isFinite(offset)) throw new Error(`${profile.name || 'Profile'} is missing utc_offset_sec.`);
   const [year, month, day] = date.split('-').map(Number);
   return Math.floor(Date.UTC(year, month - 1, day, time.hour, time.minute) / 1000 - offset);
@@ -115,10 +146,70 @@ function displayProfile(profile, person) {
   const node = document.querySelector(person === 'daniel' ? '#chartNameA' : '#chartNameB');
   if (node) node.textContent = names[person];
 }
-let selectedProfiles = [];
+function profileFromBirthFields(profile, suffix) {
+  const date = document.querySelector(`#birthDate${suffix}`).value;
+  const time = document.querySelector(`#birthTime${suffix}`).value;
+  const verified = document.querySelector(`#birthVerified${suffix}`).checked;
+  const edited = {
+    ...profile,
+    birth_date: date,
+    birth_time: time,
+    birth_place: document.querySelector(`#birthPlace${suffix}`).value.trim(),
+    timezone: document.querySelector(`#birthZone${suffix}`).value.trim(),
+    birth_time_status: verified ? 'confirmed' : (profile.birth_time_status || 'unverified')
+  };
+  try {
+    localStorage.setItem(`castalia-hd-natal:${profileStorageId(profile)}`, JSON.stringify({
+      birth_date: edited.birth_date,
+      birth_time: edited.birth_time,
+      birth_place: edited.birth_place,
+      timezone: edited.timezone,
+      birth_time_status: edited.birth_time_status
+    }));
+  } catch (error) { console.warn('Could not save local birth details:', error); }
+  return edited;
+}
+function profileStorageId(profile) {
+  return normalizedLogin(profile.github) || String(profile.name || 'profile').trim().toLowerCase().replace(/[^a-z0-9]+/g, '-');
+}
+function fillBirthFields(profile, suffix) {
+  let stored = {};
+  try { stored = JSON.parse(localStorage.getItem(`castalia-hd-natal:${profileStorageId(profile)}`) || '{}'); }
+  catch (error) { console.warn('Could not read local birth details:', error); }
+  const data = { ...profile, ...stored };
+  document.querySelector(`#birthDate${suffix}`).value = String(data.birth_date || '').slice(0, 10);
+  const timeIsVerified = /exact|recorded|confirmed/i.test(data.birth_time_status || '');
+  document.querySelector(`#birthTime${suffix}`).value = timeIsVerified ? inputTime(data.birth_time) : '';
+  document.querySelector(`#birthTime${suffix}`).placeholder = timeIsVerified ? 'HH:MM' : 'Enter verified local time';
+  document.querySelector(`#birthPlace${suffix}`).value = data.birth_place || '';
+  document.querySelector(`#birthZone${suffix}`).value = data.timezone || '';
+  document.querySelector(`#birthVerified${suffix}`).checked = /exact|recorded|confirmed/i.test(data.birth_time_status || '');
+  document.querySelector(`#birthName${suffix}`).textContent = profile.name || `Person ${suffix === 'A' ? '1' : '2'}`;
+}
+function showBirthDetails(show) {
+  birthDetails.hidden = !show;
+  authPanel.classList.toggle('is-editing', show);
+  birthDetailsButton.textContent = show ? 'Hide birth details' : (selectedProfiles.some(p => p.github || p.birth_date) ? 'Edit birth details' : 'Enter birth details');
+}
+let selectedProfiles = [
+  {
+    name: 'Daniel', birth_date: '1972-05-06', birth_time: '09:30',
+    birth_place: 'Tallahassee, FL', timezone: 'America/New_York',
+    utc_offset_sec: -14400, birth_time_status: 'confirmed'
+  },
+  {
+    name: 'Camille', birth_date: '1983-09-23', birth_time: '09:17',
+    birth_place: 'Exeter, NH', timezone: 'America/New_York',
+    utc_offset_sec: -14400, birth_time_status: 'confirmed'
+  }
+];
+fillBirthFields(selectedProfiles[0], 'A'); fillBirthFields(selectedProfiles[1], 'B');
+displayProfile(selectedProfiles[0], 'daniel'); displayProfile(selectedProfiles[1], 'camille');
 async function applyProfiles() {
-  const [a, b] = selectedProfiles;
-  if (!a || !b) return;
+  const [baseA, baseB] = selectedProfiles;
+  if (!baseA || !baseB) return;
+  const a = profileFromBirthFields(baseA, 'A');
+  const b = profileFromBirthFields(baseB, 'B');
   status('Calculating Human Design activations…');
   try {
     const [gatesA, gatesB] = await Promise.all([activeGates(a), activeGates(b)]);
@@ -127,16 +218,25 @@ async function applyProfiles() {
     document.querySelector('#danielGates').dispatchEvent(new Event('input', { bubbles: true }));
     document.querySelector('#camilleGates').dispatchEvent(new Event('input', { bubbles: true }));
     displayProfile(a, 'daniel'); displayProfile(b, 'camille');
-    status(`${names.daniel} and ${names.camille} loaded. Birth data remains in this browser.`);
+    status(`${names.daniel} and ${names.camille} charts calculated. Form edits are saved in this browser.`);
   } catch (error) { status(error.message); }
 }
+void applyProfiles();
 function installProfileOptions(profiles, login) {
   const mine = profiles.findIndex(p => normalizedLogin(p.github) === normalizedLogin(login));
   [personA, personB].forEach(select => { select.replaceChildren(); profiles.forEach((p, i) => select.add(new Option(p.name || `Profile ${i + 1}`, String(i)))); });
   const first = mine >= 0 ? mine : 0;
-  const second = profiles.findIndex((p, i) => i !== first && /partner|spouse/i.test(p.relationship || p.role || ''));
+  const camille = profiles.findIndex((p, i) => i !== first && /camille/i.test(p.name || ''));
+  const second = camille >= 0 ? camille : profiles.findIndex((p, i) => i !== first && /partner|spouse/i.test(p.relationship || p.role || ''));
   personA.value = String(first); personB.value = String(second >= 0 ? second : Math.min(first + 1, profiles.length - 1));
-  const update = () => { selectedProfiles = [profiles[Number(personA.value)], profiles[Number(personB.value)]]; void applyProfiles(); };
+  const update = () => {
+    selectedProfiles = [profiles[Number(personA.value)], profiles[Number(personB.value)]];
+    fillBirthFields(selectedProfiles[0], 'A'); fillBirthFields(selectedProfiles[1], 'B');
+    const needsReview = selectedProfiles.some(p => !/exact|recorded|confirmed/i.test(p.birth_time_status || ''));
+    birthDetailsButton.hidden = false;
+    showBirthDetails(needsReview);
+    void applyProfiles();
+  };
   personA.onchange = update; personB.onchange = update; update();
 }
 let supabase = null, loadedUser = null;
@@ -150,7 +250,9 @@ if (config.supabaseUrl && config.supabaseAnonKey) {
   logoutButton.addEventListener('click', async () => { await supabase.auth.signOut(); location.reload(); });
   supabase.auth.onAuthStateChange((_event, session) => { void handleSession(session); });
   supabase.auth.getSession().then(({ data }) => handleSession(data.session));
-} else { loginButton.disabled = true; status('Castalia sign-in is not configured yet.'); }
+} else { loginButton.disabled = true; status('Showing Daniel and Camille as example charts. Castalia sign-in is not configured yet.'); }
+birthDetailsButton.addEventListener('click', () => showBirthDetails(birthDetails.hidden));
+document.querySelector('#applyBirthDetails').addEventListener('click', () => { void applyProfiles(); });
 async function handleSession(session) {
   if (!session?.user || !supabase) return;
   const login = session.user.user_metadata?.user_name || session.user.user_metadata?.preferred_username || session.user.user_metadata?.login;
