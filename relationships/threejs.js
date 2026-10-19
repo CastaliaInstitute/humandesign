@@ -505,6 +505,7 @@ const pointer = new THREE.Vector2();
 const tip = document.querySelector('#sceneTip');
 let hoveredKey = null;
 let highlighted = [];
+let touchStart = null;
 function clearHover() {
   for (const { mesh, material, highlightedMaterial } of highlighted) {
     mesh.material = material;
@@ -538,17 +539,39 @@ function setHover(info, key) {
   tip.hidden = false;
   canvas.style.cursor = 'help';
 }
-canvas.addEventListener('pointermove', event => {
+function featureAt(clientX, clientY) {
   const rect = canvas.getBoundingClientRect();
-  pointer.set(((event.clientX - rect.left) / rect.width) * 2 - 1, -((event.clientY - rect.top) / rect.height) * 2 + 1);
+  pointer.set(((clientX - rect.left) / rect.width) * 2 - 1, -((clientY - rect.top) / rect.height) * 2 + 1);
   raycaster.setFromCamera(pointer, camera);
-  const hit = raycaster.intersectObject(chartRoot, true).find(intersection => intersection.object.userData.hoverTip);
+  return raycaster.intersectObject(chartRoot, true).find(intersection => intersection.object.userData.hoverTip);
+}
+function positionTip(clientX, clientY) {
+  tip.style.left = `${Math.max(12, Math.min(clientX + 14, window.innerWidth - tip.offsetWidth - 12))}px`;
+  tip.style.top = `${Math.max(12, Math.min(clientY + 14, window.innerHeight - tip.offsetHeight - 12))}px`;
+}
+canvas.addEventListener('pointermove', event => {
+  if (event.pointerType === 'touch') return;
+  const hit = featureAt(event.clientX, event.clientY);
   if (!hit) { clearHover(); return; }
   setHover(hit.object.userData.hoverTip, hit.object.userData.hoverKey);
-  tip.style.left = `${Math.min(event.clientX + 14, window.innerWidth - tip.offsetWidth - 12)}px`;
-  tip.style.top = `${Math.min(event.clientY + 14, window.innerHeight - tip.offsetHeight - 12)}px`;
+  positionTip(event.clientX, event.clientY);
 });
-canvas.addEventListener('pointerleave', clearHover);
+canvas.addEventListener('pointerleave', event => { if (event.pointerType !== 'touch') clearHover(); });
+canvas.addEventListener('pointerdown', event => {
+  if (event.pointerType === 'touch') touchStart = { x: event.clientX, y: event.clientY };
+});
+canvas.addEventListener('pointerup', event => {
+  if (event.pointerType !== 'touch' || !touchStart) return;
+  const moved = Math.hypot(event.clientX - touchStart.x, event.clientY - touchStart.y);
+  touchStart = null;
+  if (moved > 10) return;
+  const hit = featureAt(event.clientX, event.clientY);
+  if (!hit) { clearHover(); return; }
+  const key = hit.object.userData.hoverKey;
+  if (key === hoveredKey && !tip.hidden) { clearHover(); return; }
+  setHover(hit.object.userData.hoverTip, key);
+  positionTip(event.clientX, event.clientY);
+});
 
 function loadFeatureDescriptions(svgDocument) {
   for (const gate of svgDocument.querySelectorAll('.gate[data-gate]')) {
