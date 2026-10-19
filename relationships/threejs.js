@@ -5,7 +5,7 @@ import { SVGLoader } from 'three/addons/loaders/SVGLoader.js';
 const canvas = document.querySelector('#scene');
 const status = document.querySelector('#status');
 const scene = new THREE.Scene();
-scene.background = new THREE.Color('#f4f0e5');
+scene.background = new THREE.Color('#f8f5ed');
 // Orthographic projection keeps parallel chart planes the same apparent size,
 // which is essential for a mathematically exact front overlap.
 const camera = new THREE.OrthographicCamera(-300, 300, 300, -300, 1, 3000);
@@ -44,9 +44,9 @@ let exactFrontAlignment = true;
 let frontPerson = 'daniel';
 const flowAnimations = [];
 const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-const colors = { daniel: new THREE.Color('#218caf'), camille: new THREE.Color('#d96f8c') };
-const pale = new THREE.Color('#faf6ec');
-const gray = new THREE.Color('#a89f8e');
+const colors = { daniel: new THREE.Color('#087fa5'), camille: new THREE.Color('#cf4f79') };
+const pale = new THREE.Color('#fffcf5');
+const gray = new THREE.Color('#96928a');
 const relationshipChannelReadings = {
   '47-64': { name: 'Abstraction', description: 'Past images and experiences may feel confusing at first, then settle into a story or meaning with time.' },
   '24-61': { name: 'Awareness', description: 'A private pull toward life’s mysteries can circle through the mind until an insight arrives; it may not yield a tidy answer on demand.' },
@@ -225,14 +225,16 @@ function makePlaneGroup(paths, person, sharedChannels, relationshipChannels) {
     if (hover && channelId && relationshipChannels.has(channelId)) hover.hoverKey = `relationship:channel:${channelId}`;
 
     if (path.subPaths?.length && isChannel) {
-      const roadColor = active ? color : gray;
+      // Keep each person's channels tinted by their chart color, including
+      // open channels; lower opacity keeps the active paths in focus.
+      const roadColor = color;
       // In exact front view, separate shared tracks by a few pixels so both
       // contributors remain visibly blue and pink instead of blending purple.
-      const opacity = active ? (exactFrontAlignment ? 0.32 : 0.72) : 0.13;
+      const opacity = active ? (exactFrontAlignment ? 0.46 : 0.78) : 0.17;
       const sharedOffset = exactFrontAlignment && active && sharedChannels.has(channelId) ? (person === 'daniel' ? -2.2 : 2.2) : 0;
       // Each SVG rail becomes a two-lane carriageway; the divider and dashed lane marks make the road legible in depth.
       const roadMat = lineMaterial(roadColor, opacity);
-      const laneMat = lineMaterial(pale, active ? (exactFrontAlignment ? 0.14 : 0.62) : 0.09);
+      const laneMat = lineMaterial(pale, active ? (exactFrontAlignment ? 0.22 : 0.7) : 0.13);
       for (const subPath of path.subPaths) {
         const rawPoints = subPath.getPoints(16);
         const points = sharedOffset ? offsetPathPoints(rawPoints, sharedOffset) : rawPoints;
@@ -246,7 +248,7 @@ function makePlaneGroup(paths, person, sharedChannels, relationshipChannels) {
           const isReturnLane = cls.split(/\s+/).includes('paired-rail');
           if (isReturnLane) flowPoints.reverse();
           const flowCurve = new THREE.CatmullRomCurve3(flowPoints.map(point => new THREE.Vector3(point.x, point.y, 4.3)), false, 'centripetal');
-          addFlowMotion(group, flowCurve, isReturnLane ? '#39aabd' : '#ffc247', hover);
+          addFlowMotion(group, flowCurve, isReturnLane ? '#a6edf7' : '#ffc247', hover);
         }
         if (active && points.length > 5) {
           const divider = tubeFromPoints(points, 0.22, laneMat, 2.6);
@@ -265,8 +267,9 @@ function makePlaneGroup(paths, person, sharedChannels, relationshipChannels) {
 
     if (path.subPaths?.length && (isGateMarker || isCenterShape)) {
       const fillColor = isGateMarker ? (gateActive ? color : pale) : (centerActive ? color : pale);
-      const fillMat = new THREE.MeshBasicMaterial({ color: fillColor, transparent: true, opacity: isCenterShape ? (centerActive ? (exactFrontAlignment ? 0.22 : 0.33) : 0.38) : (exactFrontAlignment ? 0.52 : 0.9), side: THREE.DoubleSide, depthWrite: false });
-      const outlineMat = lineMaterial(isCenterShape && centerActive ? color : (gateActive ? color : gray), exactFrontAlignment ? 0.72 : 0.92);
+      const fillMat = new THREE.MeshBasicMaterial({ color: fillColor, transparent: true, opacity: isCenterShape ? (centerActive ? (exactFrontAlignment ? 0.3 : 0.42) : 0.48) : (exactFrontAlignment ? 0.64 : 0.94), side: THREE.DoubleSide, depthWrite: false });
+      const outlineActive = isCenterShape ? centerActive : gateActive;
+      const outlineMat = lineMaterial(color, exactFrontAlignment ? (outlineActive ? 0.92 : 0.56) : (outlineActive ? 1 : 0.76));
       for (const shape of path.toShapes(true)) addShapeMesh(group, shape, fillMat, isCenterShape ? 1.2 : 3.1, hover);
       for (const subPath of path.subPaths) {
         outlineFromSubPath(group, subPath, outlineMat, isCenterShape ? 1.5 : 3.3, hover);
