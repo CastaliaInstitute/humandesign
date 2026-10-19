@@ -17,6 +17,9 @@ function normalizedLogin(value) { return String(value || '').replace(/^@/, '').t
 function repoHeaders(token) { return { Accept: 'application/vnd.github+json', ...(token ? { Authorization: `Bearer ${token}` } : {}) }; }
 async function githubJson(url, token) {
   const response = await fetch(url, { headers: repoHeaders(token) });
+  if (!response.ok && (response.status === 401 || response.status === 403)) {
+    throw new Error('GitHub repository access was not granted. Public family repositories can be read; private natal data needs a repository-scoped, read-only GitHub App connection.');
+  }
   if (!response.ok) throw new Error(`GitHub returned ${response.status} for ${new URL(url).pathname}`);
   return response.json();
 }
