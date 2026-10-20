@@ -13,6 +13,7 @@ const status = document.querySelector('#status');
 const scene = new THREE.Scene();
 scene.background = new THREE.Color('#f8f5ed');
 const chartViewHeight = 360;
+const chartSilhouetteWidth = 135;
 const parentChartScale = 0.9;
 // Orthographic projection keeps parallel chart planes the same apparent size,
 // which is essential for a mathematically exact front overlap.
@@ -85,7 +86,7 @@ let autoRotate = !reduceMotion;
 const autoRotateSpeed = 0.035; // radians per second; one slow turn takes about three minutes
 const colors = { daniel: new THREE.Color('#087fa5'), camille: new THREE.Color('#cf4f79') };
 const childPalette = ['#488f73', '#b67a37', '#7864a6', '#518a9d'].map(color => new THREE.Color(color));
-const familyLayout = { parentScale: parentChartScale, childScale: parentChartScale, parentRadius: 260 };
+const familyLayout = { parentScale: parentChartScale, childScale: parentChartScale, parentRadius: 220 };
 function childPlaneRadius() {
   return Number(document.querySelector('#separation').value) / 2;
 }
@@ -1249,7 +1250,7 @@ function resize() {
   if (!rect.width || !rect.height) return;
   renderer.setSize(rect.width, rect.height, false);
   const aspect = rect.width / rect.height;
-  const chartWidth = 388.8 * familyLayout.parentScale;
+  const chartWidth = chartSilhouetteWidth * familyLayout.parentScale;
   const chartHeight = chartViewHeight * familyLayout.parentScale;
   // Size chart width against the viewport, then expand only if the currently
   // projected family footprint requires it. A projected-width calculation
@@ -1261,7 +1262,10 @@ function resize() {
   let projectedHalfWidth = 0;
   if (chartCenters.length) {
     const cameraRight = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
-    projectedHalfWidth = Math.max(...chartCenters.map(center => Math.abs(center.dot(cameraRight)))) + chartWidth / 2 + 8;
+    chartRoot.updateMatrixWorld(true);
+    projectedHalfWidth = Math.max(...chartCenters.map(center =>
+      Math.abs(chartRoot.localToWorld(center).sub(controls.target).dot(cameraRight))
+    )) + chartWidth / 2 + 8;
   }
   const halfWidth = Math.max(desiredHalfWidth, projectedHalfWidth);
   const halfHeight = Math.max(chartHeight / 2 + 8, halfWidth / aspect);
