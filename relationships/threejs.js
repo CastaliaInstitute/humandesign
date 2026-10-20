@@ -35,7 +35,6 @@ lockOrbitElevation();
 const chartRoot = new THREE.Group();
 scene.add(chartRoot);
 const planeGroups = {};
-const summaryLabels = {};
 let relationshipGroup = null;
 const transitGroups = {};
 const familyGroups = {};
@@ -134,12 +133,22 @@ function frontFamilyReading() {
   const frontName = personName(frontPerson);
   const summary = summarizeChart(gates.get(frontPerson), activations(frontPerson));
   const heading = document.querySelector('#familyReadingTitle');
-  if (heading) heading.textContent = `${frontName} in the family`;
+  if (heading) heading.textContent = 'Family chart descriptions';
   if (!summary) return;
+
+  const profiles = [
+    'daniel', 'camille', ...familyChildren.map(child => child.id)
+  ].map(person => {
+    const chart = summarizeChart(gates.get(person) || gatesFor(person), activations(person));
+    return chart ? `${personName(person)}: ${chart.label}` : '';
+  }).filter(Boolean);
+  const profileLine = document.createElement('p');
+  profileLine.textContent = profiles.join(' · ');
+  root.append(profileLine);
 
   const centerNames = summary.definedCenters.map(center => centerDescriptions[center]?.[0] || center);
   const intro = document.createElement('p');
-  intro.textContent = `${frontName} · ${summary.label}. ${summary.definedChannels.length} defined channels connect ${centerNames.length ? `${centerNames.length} centers (${centerNames.join(', ')})` : 'no centers'} in this chart.`;
+  intro.textContent = `In front: ${frontName} · ${summary.label}. ${summary.definedChannels.length} defined channels connect ${centerNames.length ? `${centerNames.length} centers (${centerNames.join(', ')})` : 'no centers'} in this chart.`;
   root.append(intro);
 
   const channels = [...sourceDocument.querySelectorAll('.person--daniel .channel-group[data-from][data-to]')].map(channel => {
@@ -171,35 +180,6 @@ function frontFamilyReading() {
   const note = document.createElement('small');
   note.textContent = 'Natal chart comparison; current transits are excluded. This describes chart connections, not a compatibility verdict.';
   root.append(note);
-}
-function makeSummaryLabel(person, gates, activations, color, x, y, z, scale = 1) {
-  const summary = summarizeChart(gates, activations);
-  if (!summary) return null;
-  const owner = window.hdChartNames?.[person] || (person === 'daniel' ? 'Person 1' : person === 'camille' ? 'Person 2' : 'Child');
-  const canvas = document.createElement('canvas');
-  canvas.width = 520; canvas.height = 108;
-  const ctx = canvas.getContext('2d');
-  ctx.fillStyle = 'rgba(255,253,247,.96)';
-  ctx.beginPath(); ctx.roundRect(3, 3, 514, 102, 18); ctx.fill();
-  ctx.strokeStyle = color.getStyle(); ctx.lineWidth = 5; ctx.stroke();
-  ctx.fillStyle = '#746e61'; ctx.font = '600 22px system-ui, sans-serif';
-  ctx.textAlign = 'left'; ctx.textBaseline = 'middle'; ctx.fillText(owner, 22, 36, 476);
-  ctx.fillStyle = '#292820';
-  let summaryFontSize = 32;
-  ctx.font = `700 ${summaryFontSize}px system-ui, sans-serif`;
-  while (ctx.measureText(summary.label).width > 476 && summaryFontSize > 21) {
-    summaryFontSize--;
-    ctx.font = `700 ${summaryFontSize}px system-ui, sans-serif`;
-  }
-  ctx.fillText(summary.label, 22, 76, 476);
-  const texture = new THREE.CanvasTexture(canvas);
-  texture.colorSpace = THREE.SRGBColorSpace;
-  const label = new THREE.Sprite(new THREE.SpriteMaterial({ map: texture, transparent: true, depthTest: false, depthWrite: false }));
-  label.scale.set(150 * scale, 31 * scale, 1);
-  label.position.set(x, y, z);
-  label.renderOrder = 20;
-  label.userData.summary = summary;
-  return label;
 }
 const pale = new THREE.Color('#fffcf5');
 const gray = new THREE.Color('#96928a');
@@ -841,26 +821,10 @@ function rebuildRelationship() {
     releaseGroup(group);
     delete familyGroups[person];
   }
-  for (const [person, label] of Object.entries(summaryLabels)) {
-    releaseGroup(label);
-    delete summaryLabels[person];
-  }
   const separation = Number(document.querySelector('#separation').value);
   const half = separation / 2;
   planeGroups.daniel.position.z = frontPerson === 'daniel' ? half : -half;
   planeGroups.camille.position.z = -planeGroups.daniel.position.z;
-  for (const person of ['daniel', 'camille']) {
-    const gates = person === 'daniel' ? danielGates : camilleGates;
-    const activations = window.hdNatalPlanetaryActivations?.[person] || [];
-    const centerY = person === 'daniel' ? familyLayout.parentRadius : -familyLayout.parentRadius;
-    const labelY = centerY + (person === 'daniel' ? 140 : -140);
-    const label = makeSummaryLabel(person, gates, activations, colors[person], 0, labelY, planeGroups[person].position.z + 7, familyLayout.parentScale);
-    if (label) {
-      label.visible = document.querySelector(person === 'daniel' ? '#showDaniel' : '#showCamille').checked;
-      summaryLabels[person] = label;
-      chartRoot.add(label);
-    }
-  }
   document.querySelector('#separationValue').value = String(separation);
   releaseGroup(relationshipGroup);
   relationshipGroup = makeRelationshipGroup(layers.daniel, layers.camille, danielGates, camilleGates, separation, transitSnapshot);
@@ -898,8 +862,6 @@ function rebuildRelationship() {
     childGroup.position.z = 0;
     familyGroups[child.id] = childGroup;
     chartRoot.add(childGroup);
-    const childLabel = makeSummaryLabel(child.id, new Set(child.gates), child.activations || [], color, offsetX, offsetY + 100, 7, 0.58);
-    if (childLabel) { summaryLabels[child.id] = childLabel; chartRoot.add(childLabel); }
     if (transitSnapshot) {
       const activations = new Set([...child.gates, ...transitSnapshot.gates]);
       const transitData = loader.parse(extractLayer(sourceDocument, 'daniel', activations));
@@ -1136,11 +1098,9 @@ for (const selector of ['#danielGates', '#camilleGates']) document.querySelector
 document.querySelector('#showBridges').addEventListener('change', e => { if (relationshipGroup) relationshipGroup.visible = e.target.checked; });
 document.querySelector('#showDaniel').addEventListener('change', e => {
   if (planeGroups.daniel) planeGroups.daniel.visible = e.target.checked;
-  if (summaryLabels.daniel) summaryLabels.daniel.visible = e.target.checked;
 });
 document.querySelector('#showCamille').addEventListener('change', e => {
   if (planeGroups.camille) planeGroups.camille.visible = e.target.checked;
-  if (summaryLabels.camille) summaryLabels.camille.visible = e.target.checked;
 });
 transitToggle.addEventListener('change', e => {
   for (const group of Object.values(transitGroups)) group.visible = e.target.checked;
