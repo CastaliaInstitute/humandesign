@@ -37,6 +37,8 @@ scene.add(chartRoot);
 const planeGroups = {};
 let relationshipGroup = null;
 const transitGroups = {};
+const familyGroups = {};
+let familyChildren = [];
 let transitSnapshot = null;
 const transitToggle = document.querySelector('#showTransits');
 try {
@@ -54,6 +56,17 @@ let frontPerson = 'daniel';
 const flowAnimations = [];
 const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 const colors = { daniel: new THREE.Color('#087fa5'), camille: new THREE.Color('#cf4f79') };
+const childPalette = ['#488f73', '#b67a37', '#7864a6', '#518a9d'].map(color => new THREE.Color(color));
+function chartColor(person) {
+  if (colors[person]) return colors[person];
+  const childIndex = Math.max(0, familyChildren.findIndex(child => child.id === person));
+  return childPalette[childIndex % childPalette.length];
+}
+function gatesFor(person) {
+  if (person === 'daniel') return parseGateList('#danielGates');
+  if (person === 'camille') return parseGateList('#camilleGates');
+  return new Set(familyChildren.find(child => child.id === person)?.gates || []);
+}
 const pale = new THREE.Color('#fffcf5');
 const gray = new THREE.Color('#96928a');
 const relationshipChannelReadings = {
@@ -256,7 +269,7 @@ function describePathFeature(node, person) {
     const doc = center.ownerDocument || sourceDocument;
     let summary = '';
     if (defined && doc) {
-      const activeGates = new Set(parseGateList(person === 'daniel' ? '#danielGates' : '#camilleGates'));
+      const activeGates = gatesFor(person);
       const centerGates = [...doc.querySelectorAll(`.gate[data-center="${centerId}"]`)].map(gate => +gate.dataset.gate).filter(Number.isFinite);
       const activeCenterGates = centerGates.filter(gate => activeGates.has(gate));
       const definedChannels = [...doc.querySelectorAll('.channel-group[data-from][data-to]')]
@@ -274,10 +287,11 @@ function describePathFeature(node, person) {
 function lineMaterial(color, opacity=1) {
   return new THREE.MeshBasicMaterial({ color, transparent: opacity < 1, opacity, side: THREE.DoubleSide, depthWrite: false });
 }
-function makePlaneGroup(paths, person, sharedChannels, relationshipChannels) {
+function makePlaneGroup(paths, person, sharedChannels, relationshipChannels, options = {}) {
   const group = new THREE.Group();
-  group.name = `${window.hdChartNames?.[person] || (person === 'daniel' ? 'Person 1' : 'Person 2')} · ${person === 'daniel' ? 'blue' : 'pink'} SVG plane`;
-  const color = colors[person];
+  const owner = options.name || window.hdChartNames?.[person] || (person === 'daniel' ? 'Person 1' : person === 'camille' ? 'Person 2' : 'Child');
+  group.name = `${owner} · ${person === 'daniel' ? 'blue' : person === 'camille' ? 'pink' : 'child'} SVG plane`;
+  const color = options.color || chartColor(person);
   const gatePoints = getGatePoints(paths);
   for (const path of paths) {
     const node = path.userData.node;
@@ -361,7 +375,7 @@ function makePlaneGroup(paths, person, sharedChannels, relationshipChannels) {
 
     // Keep all remaining chart outlines and symbols faintly present as the original SVG's structural guide.
     if (path.subPaths?.length && !cls.includes('channel')) {
-      const guideMat = lineMaterial(person === 'daniel' ? color : colors.camille, 0.16);
+      const guideMat = lineMaterial(color, 0.16);
       for (const subPath of path.subPaths) {
         const guide = tubeFromPoints(subPath.getPoints(10), 0.38, guideMat, 0.7);
         if (guide) group.add(guide);
@@ -371,6 +385,10 @@ function makePlaneGroup(paths, person, sharedChannels, relationshipChannels) {
   // SVG coordinates use a downward-positive Y axis. Flip the finished plane so the chart reads upright in 3D.
   group.scale.y = -1;
   group.position.set(-194.4, 194.4, 0);
+  if (options.scale) {
+    group.scale.set(options.scale, -options.scale, options.scale);
+    group.position.set(-194.4 * options.scale + (options.offsetX || 0), 194.4 * options.scale, 0);
+  }
   return group;
 }
 function parseGateList(selector) {
@@ -556,7 +574,8 @@ function makeTransitGroup(data, snapshot, natalGates, person) {
   const activeGates = new Set([...natalGates, ...transitGates]);
   const gatePoints = getGatePoints(data.paths);
   const transitColor = new THREE.Color('#7c3aed');
-  const roadMaterial = lineMaterial(colors[person], 0.96);
+  const color = chartColor(person);
+  const roadMaterial = lineMaterial(color, 0.96);
   const ringMaterial = new THREE.MeshBasicMaterial({ color: transitColor, transparent: true, opacity: 0.98, side: THREE.DoubleSide, depthWrite: false, toneMapped: false });
   for (const path of data.paths) {
     const node = path.userData.node;
@@ -585,7 +604,7 @@ function makeTransitGroup(data, snapshot, natalGates, person) {
       group.add(dash);
     }
     const flowCurve = new THREE.CatmullRomCurve3(points.map(point => new THREE.Vector3(point.x, point.y, 3.55)), false, 'centripetal');
-    addFlowMotion(group, flowCurve, colors[person].getStyle(), hover);
+    addFlowMotion(group, flowCurve, color.getStyle(), hover);
   }
   for (const gate of transitGates) {
     const point = gatePoints.get(gate);
@@ -633,6 +652,10 @@ function rebuildRelationship() {
     planeGroups[person] = group;
     chartRoot.add(group);
   }
+  for (const [person, group] of Object.entries(familyGroups)) {
+    releaseGroup(group);
+    delete familyGroups[person];
+  }
   const separation = Number(document.querySelector('#separation').value);
   const half = separation / 2;
   planeGroups.daniel.position.z = frontPerson === 'daniel' ? half : -half;
@@ -642,8 +665,8 @@ function rebuildRelationship() {
   relationshipGroup = makeRelationshipGroup(layers.daniel, layers.camille, danielGates, camilleGates, separation, transitSnapshot);
   chartRoot.add(relationshipGroup);
   relationshipGroup.visible = document.querySelector('#showBridges').checked;
-  for (const person of ['daniel', 'camille']) {
-    releaseGroup(transitGroups[person]);
+  for (const [person, group] of Object.entries(transitGroups)) {
+    releaseGroup(group);
     delete transitGroups[person];
   }
   if (transitSnapshot) {
@@ -658,10 +681,40 @@ function rebuildRelationship() {
       group.visible = transitToggle.checked;
     }
   }
+  familyChildren.forEach((child, index) => {
+    const side = index % 2 === 0 ? -1 : 1;
+    const column = Math.floor(index / 2);
+    const offsetX = side * (102 + column * 66);
+    const childData = loader.parse(extractLayer(sourceDocument, 'daniel', new Set(child.gates)));
+    const color = childPalette[index % childPalette.length];
+    const childGroup = makePlaneGroup(childData.paths, child.id, new Set(), new Set(), {
+      color, name: child.name, scale: 0.48, offsetX
+    });
+    childGroup.position.z = 0;
+    familyGroups[child.id] = childGroup;
+    chartRoot.add(childGroup);
+    if (transitSnapshot) {
+      const activations = new Set([...child.gates, ...transitSnapshot.gates]);
+      const transitData = loader.parse(extractLayer(sourceDocument, 'daniel', activations));
+      const transitGroup = makeTransitGroup(transitData, transitSnapshot, new Set(child.gates), child.id);
+      transitGroup.scale.set(0.48, -0.48, 0.48);
+      transitGroup.position.set(-194.4 * 0.48 + offsetX, 194.4 * 0.48, 0);
+      transitGroup.position.z = 0;
+      transitGroups[child.id] = transitGroup;
+      chartRoot.add(transitGroup);
+      transitGroup.visible = transitToggle.checked;
+    }
+  });
   planeGroups.daniel.visible = document.querySelector('#showDaniel').checked;
   planeGroups.camille.visible = document.querySelector('#showCamille').checked;
   setStatus(`${relationshipGroup.userData.bridgeCount} relationship channel${relationshipGroup.userData.bridgeCount === 1 ? '' : 's'} shown.`);
 }
+
+window.addEventListener('castalia-family-children-updated', event => {
+  familyChildren = Array.isArray(event.detail) ? event.detail : [];
+  familyChildren.forEach((child, index) => { window.hdChartNames[child.id] = child.name || `Child ${index + 1}`; });
+  if (sourceDocument && loader) { rebuildRelationship(); resize(); }
+});
 
 async function refreshTransits() {
   const status = document.querySelector('#transitStatus');
@@ -679,8 +732,10 @@ function resize() {
   const rect = canvas.getBoundingClientRect();
   if (!rect.width || !rect.height) return;
   renderer.setSize(rect.width, rect.height, false);
-  const halfHeight = 300;
-  const halfWidth = halfHeight * rect.width / rect.height;
+  const aspect = rect.width / rect.height;
+  const outerChildOffset = 102 + Math.floor(Math.max(0, familyChildren.length - 1) / 2) * 66;
+  const halfWidth = Math.max(300 * aspect, outerChildOffset + 36);
+  const halfHeight = Math.max(300, halfWidth / aspect);
   camera.left = -halfWidth;
   camera.right = halfWidth;
   camera.top = halfHeight;

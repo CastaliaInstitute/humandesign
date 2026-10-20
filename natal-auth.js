@@ -44,10 +44,12 @@ async function loadFamilyDocument(login, token) {
   throw new Error('No readable castalia-family.json was found in a castalia-family-* GitHub repository. Private repositories need a repository-scoped, read-only GitHub connection.');
 }
 function profilesFrom(document) {
-  return [...(document.guardians || []), ...(document.children || [])].filter(p =>
+  const guardians = (document.guardians || []).map(p => ({ ...p, familyRole: 'guardian' }));
+  const children = (document.children || []).map(p => ({ ...p, familyRole: 'child' }));
+  return [...guardians, ...children].filter(p =>
     p && p.birth_date && p.birth_time && p.birth_place && p.latitude != null && p.longitude != null
   ).map(p => ({
-    name: p.name, github: p.github, relationship: p.relationship, role: p.role,
+    name: p.name, github: p.github, relationship: p.relationship, role: p.role, familyRole: p.familyRole,
     birth_date: p.birth_date, birth_time: p.birth_time, birth_time_status: p.birth_time_status,
     birth_place: p.birth_place, timezone: p.timezone, utc_offset_sec: p.utc_offset_sec,
     latitude: p.latitude, longitude: p.longitude
@@ -142,6 +144,18 @@ async function activeGates(profile) {
   for (const body of BODY_KEYS) gates.add(gateAt(await longitude(design, body)));
   gates.add(gateAt((await longitude(design, 'true_node') + 180) % 360));
   return [...gates].sort((a, b) => a - b);
+}
+async function publishChildren(profiles) {
+  const children = await Promise.all((profiles || []).filter(profile => profile.familyRole === 'child').map(async (profile, index) => {
+    try {
+      return { id: `child-${index + 1}`, name: profile.name || `Child ${index + 1}`, gates: await activeGates(profile) };
+    } catch (error) {
+      console.warn(`Skipping child chart for ${profile.name || `Child ${index + 1}`}:`, error.message);
+      return null;
+    }
+  }));
+  window.hdRelationshipChildren = children.filter(Boolean);
+  window.dispatchEvent(new CustomEvent('castalia-family-children-updated', { detail: window.hdRelationshipChildren }));
 }
 function displayProfile(profile, person) {
   names[person] = profile.name || profile.display_name || (person === 'daniel' ? 'Person 1' : 'Person 2');
@@ -242,6 +256,7 @@ async function applyProfiles(signedInChart = false) {
 }
 void applyProfiles();
 function installProfileOptions(profiles, login) {
+  void publishChildren(profiles);
   const mine = profiles.findIndex(p => normalizedLogin(p.github) === normalizedLogin(login));
   [personA, personB].forEach(select => { select.replaceChildren(); profiles.forEach((p, i) => select.add(new Option(p.name || `Profile ${i + 1}`, String(i)))); });
   const first = mine >= 0 ? mine : 0;
