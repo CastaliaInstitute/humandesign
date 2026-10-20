@@ -129,10 +129,18 @@ function gateAt(longitude) {
   const adjusted = ((longitude - 358.25) % 360 + 360) % 360;
   return GATE_ORDER[Math.min(63, Math.floor(adjusted / gateStep))];
 }
-async function activeGates(profile) {
-  const birth = epochFor(profile), gates = new Set();
-  for (const body of BODY_KEYS) gates.add(gateAt(await longitude(birth, body)));
-  gates.add(gateAt((await longitude(birth, 'true_node') + 180) % 360));
+async function chartActivationsAt(epoch, type) {
+  const activations = [];
+  for (const planet of BODY_KEYS) activations.push({
+    planet: planet === 'true_node' ? 'north_node' : planet,
+    gate: gateAt(await longitude(epoch, planet)),
+    type
+  });
+  activations.push({ planet: 'south_node', gate: gateAt((await longitude(epoch, 'true_node') + 180) % 360), type });
+  return activations;
+}
+async function activeChart(profile) {
+  const birth = epochFor(profile);
   let earlier = birth - 100 * 86400, later = birth - 75 * 86400;
   const birthSun = await longitude(birth);
   for (let i = 0; i < 32 && later - earlier > 1; i++) {
@@ -141,14 +149,17 @@ async function activeGates(profile) {
     if (arc > 88) earlier = candidate; else later = candidate;
   }
   const design = Math.floor((earlier + later) / 2);
-  for (const body of BODY_KEYS) gates.add(gateAt(await longitude(design, body)));
-  gates.add(gateAt((await longitude(design, 'true_node') + 180) % 360));
-  return [...gates].sort((a, b) => a - b);
+  const activations = [
+    ...await chartActivationsAt(birth, 'personality'),
+    ...await chartActivationsAt(design, 'design')
+  ];
+  const gates = [...new Set(activations.map(activation => activation.gate))].sort((a, b) => a - b);
+  return { gates, activations };
 }
 async function publishChildren(profiles) {
   const children = await Promise.all((profiles || []).filter(profile => profile.familyRole === 'child').map(async (profile, index) => {
     try {
-      return { id: `child-${index + 1}`, name: profile.name || `Child ${index + 1}`, gates: await activeGates(profile) };
+      return { id: `child-${index + 1}`, name: profile.name || `Child ${index + 1}`, ...await activeChart(profile) };
     } catch (error) {
       console.warn(`Skipping child chart for ${profile.name || `Child ${index + 1}`}:`, error.message);
       return null;
@@ -233,9 +244,11 @@ async function applyProfiles(signedInChart = false) {
   const b = profileFromBirthFields(baseB, 'B');
   status('Calculating Human Design activations…');
   try {
-    const [gatesA, gatesB] = await Promise.all([activeGates(a), activeGates(b)]);
-    document.querySelector('#danielGates').value = gatesA.join(', ');
-    document.querySelector('#camilleGates').value = gatesB.join(', ');
+    const [chartA, chartB] = await Promise.all([activeChart(a), activeChart(b)]);
+    document.querySelector('#danielGates').value = chartA.gates.join(', ');
+    document.querySelector('#camilleGates').value = chartB.gates.join(', ');
+    window.hdNatalPlanetaryActivations = { daniel: chartA.activations, camille: chartB.activations };
+    window.dispatchEvent(new CustomEvent('castalia-natal-activations-updated', { detail: window.hdNatalPlanetaryActivations }));
     document.querySelector('#danielGates').dispatchEvent(new Event('input', { bubbles: true }));
     document.querySelector('#camilleGates').dispatchEvent(new Event('input', { bubbles: true }));
     displayProfile(a, 'daniel'); displayProfile(b, 'camille');

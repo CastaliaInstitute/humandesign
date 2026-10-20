@@ -239,6 +239,54 @@ function offsetPathPoints(points, amount) {
   });
 }
 function hoverInfo(key, title, detail) { return { hoverKey: key, hoverTip: { title, detail } }; }
+const planetSymbols = {
+  sun: '☉', earth: '⊕', moon: '☽', mercury: '☿', venus: '♀', mars: '♂',
+  jupiter: '♃', saturn: '♄', uranus: '♅', neptune: '♆', pluto: '♇',
+  north_node: '☊', south_node: '☋'
+};
+function addPlanetIndicators(target, points, channel, gatePoints, activationsByGate, channelId, person) {
+  if (points.length < 2) return;
+  const from = +channel.dataset.from, to = +channel.dataset.to;
+  const fromPoint = gatePoints.get(from);
+  const startsAtFrom = fromPoint && Math.hypot(points[0].x - fromPoint.x, points[0].y - fromPoint.y) <= Math.hypot(points[points.length - 1].x - fromPoint.x, points[points.length - 1].y - fromPoint.y);
+  const curve = new THREE.CatmullRomCurve3(points.map(point => new THREE.Vector3(point.x, point.y, 6.1)), false, 'centripetal');
+  for (const [gate, baseT] of [[startsAtFrom === false ? to : from, 0.12], [startsAtFrom === false ? from : to, 0.88]]) {
+    const activations = activationsByGate.get(gate) || [];
+    activations.forEach((activation, index) => {
+      const typeColor = activation.type === 'design' ? '#cf2943' : '#24231f';
+      const canvas = document.createElement('canvas');
+      canvas.width = 64; canvas.height = 40;
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = '#fffdf7';
+      ctx.beginPath(); ctx.roundRect(2, 3, 60, 34, 8); ctx.fill();
+      ctx.strokeStyle = typeColor; ctx.lineWidth = 3; ctx.stroke();
+      ctx.fillStyle = typeColor;
+      ctx.font = 'bold 25px Georgia, serif';
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(planetSymbols[activation.planet] || activation.planet.slice(0, 2), 32, 21);
+      const texture = new THREE.CanvasTexture(canvas);
+      texture.colorSpace = THREE.SRGBColorSpace;
+      const marker = new THREE.Sprite(new THREE.SpriteMaterial({ map: texture, transparent: true, depthWrite: false }));
+      marker.scale.set(8.4, 5.25, 1);
+      const spread = (index - (activations.length - 1) / 2) * 0.08;
+      const point = curve.getPointAt(THREE.MathUtils.clamp(baseT + spread, 0.04, 0.96));
+      const tangent = curve.getTangentAt(THREE.MathUtils.clamp(baseT + spread, 0.04, 0.96));
+      const sideOffset = index % 2 === 0 ? -2.5 : 2.5;
+      const chartOffset = person === 'daniel' ? -2.5 : person === 'camille' ? 2.5 : 0;
+      marker.position.set(point.x + chartOffset - tangent.y * sideOffset, point.y + tangent.x * sideOffset, point.z);
+      marker.renderOrder = 10;
+      const label = activation.planet.replace('_', ' ');
+      const typeLabel = activation.type === 'design' ? 'Design · red' : 'Personality · black';
+      const owner = window.hdChartNames?.[person] || (person === 'daniel' ? 'Person 1' : person === 'camille' ? 'Person 2' : 'Child');
+      Object.assign(marker.userData, hoverInfo(
+        `natal:${person}:${activation.type}:${activation.planet}:${gate}`,
+        `${owner} · ${typeLabel} · ${label} · Gate ${gate}`,
+        `${owner}: ${label} activates Gate ${gate} in the ${activation.type} chart. Shown on channel ${channelId.replace('-', '–')}.`
+      ));
+      target.add(marker);
+    });
+  }
+}
 function describePathFeature(node, person) {
   const owner = window.hdChartNames?.[person] || (person === 'daniel' ? 'Person 1' : 'Person 2');
   const gate = gateGroup(node);
@@ -292,6 +340,12 @@ function makePlaneGroup(paths, person, sharedChannels, relationshipChannels, opt
   const owner = options.name || window.hdChartNames?.[person] || (person === 'daniel' ? 'Person 1' : person === 'camille' ? 'Person 2' : 'Child');
   group.name = `${owner} · ${person === 'daniel' ? 'blue' : person === 'camille' ? 'pink' : 'child'} SVG plane`;
   const color = options.color || chartColor(person);
+  const planetaryActivations = options.activations || window.hdNatalPlanetaryActivations?.[person] || familyChildren.find(child => child.id === person)?.activations || [];
+  const activationsByGate = new Map();
+  for (const activation of planetaryActivations) {
+    if (!activationsByGate.has(activation.gate)) activationsByGate.set(activation.gate, []);
+    activationsByGate.get(activation.gate).push(activation);
+  }
   const gatePoints = getGatePoints(paths);
   for (const path of paths) {
     const node = path.userData.node;
@@ -347,6 +401,9 @@ function makePlaneGroup(paths, person, sharedChannels, relationshipChannels, opt
             if (dash) { if (hover) Object.assign(dash.userData, hover); group.add(dash); }
           }
         }
+      }
+      if (!cls.split(/\s+/).includes('paired-rail') && path.subPaths[0]) {
+        addPlanetIndicators(group, path.subPaths[0].getPoints(48), channel, gatePoints, activationsByGate, channelId, person);
       }
       continue;
     }
@@ -416,7 +473,7 @@ function releaseGroup(group) {
   if (!group) return;
   group.traverse(obj => {
     if (obj.geometry) obj.geometry.dispose();
-    if (obj.material) (Array.isArray(obj.material) ? obj.material : [obj.material]).forEach(m => m.dispose());
+    if (obj.material) (Array.isArray(obj.material) ? obj.material : [obj.material]).forEach(m => { m.map?.dispose(); m.dispose(); });
   });
   chartRoot.remove(group);
 }
