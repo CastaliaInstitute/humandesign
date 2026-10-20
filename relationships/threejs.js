@@ -1254,7 +1254,7 @@ function resize() {
   const chartHeight = chartViewHeight * familyLayout.parentScale;
   // Keep each graph near one fifth of the viewport width, while fitting the
   // complete family footprint and chart height at every aspect ratio.
-  const desiredHalfWidth = chartWidth / 0.4;
+  const desiredHalfWidth = chartWidth / 0.2;
   const familyHalfWidth = furthestChild + chartWidth / 2 + 8;
   const halfWidth = Math.max(desiredHalfWidth, familyHalfWidth);
   const halfHeight = Math.max(chartHeight / 2 + 8, halfWidth / aspect);
