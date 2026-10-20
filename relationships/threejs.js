@@ -211,22 +211,26 @@ function frontFamilyReading() {
   const frontName = personName(readingPerson);
   const summary = summarizeChart(gates.get(readingPerson), activations(readingPerson));
   const heading = document.querySelector('#familyReadingTitle');
-  if (heading) heading.textContent = `Family chart descriptions · ${frontName} in front`;
+  if (heading) heading.textContent = `${frontName} · chart reading`;
   if (!summary) return;
 
   const profiles = [
     'daniel', 'camille', ...familyChildren.map(child => child.id)
   ].map(person => {
     const chart = summarizeChart(gates.get(person) || gatesFor(person), activations(person));
-    return chart ? `${personName(person)}: ${chart.label}; strategy: ${chart.strategy}` : '';
+    return chart ? `${personName(person)} is a ${chart.type}${chart.profile ? ` with a ${chart.profile} profile` : ''} and ${chart.authority.toLowerCase()} authority; their strategy is to ${chart.strategy}` : '';
   }).filter(Boolean);
   const profileLine = document.createElement('p');
-  profileLine.textContent = profiles.join(' · ');
+  profileLine.textContent = `Across the family, ${profiles.join('; ')}.`;
   root.append(profileLine);
 
   const centerNames = summary.definedCenters.map(center => centerDescriptions[center]?.[0] || center);
   const intro = document.createElement('p');
-  intro.textContent = `In front: ${frontName} · ${summary.label}. Human Design strategy: ${summary.strategy}. Defined centers: ${centerNames.join(', ') || 'none'}; defined channels: ${summary.definedChannels.length}.`;
+  const channelNames = summary.definedChannels.map(id => {
+    const reading = relationshipChannelReadings[id] || channelDescriptions.get(id);
+    return `${id.replace('-', '–')}${reading?.name ? ` ${reading.name}` : ''}`;
+  });
+  intro.textContent = `In front, ${frontName} is a ${summary.type}${summary.profile ? ` with a ${summary.profile} profile` : ''} and ${summary.authority.toLowerCase()} authority. This chart defines ${centerNames.length ? centerNames.join(', ') : 'no centers'}${channelNames.length ? `, including the ${channelNames.join(', ')} channel${channelNames.length === 1 ? '' : 's'}` : ''}. In Human Design, the suggested strategy is to ${summary.strategy}.`;
   root.append(intro);
 
   const natalFrontGates = gates.get(readingPerson);
@@ -251,77 +255,87 @@ function frontFamilyReading() {
     const transitSection = document.createElement('p');
     const asOf = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(transitSnapshot.epoch * 1000));
     if (!transitOnlyGates.length && !transitChannels.length) {
-      transitSection.textContent = `Transit snapshot as of ${asOf}: no new gates or channels are added to ${frontName}'s natal chart.`;
+      transitSection.textContent = `At ${asOf}, the current transits add no new gates or channels to ${frontName}'s chart.`;
     } else {
-      const gateDetails = transitOnlyGates.map(gate => `Gate ${gate} (${transitPlanetNames(gate)}) ${transitGateWindow(gate)}`);
+      const gateDetails = transitOnlyGates.map(gate => `Gate ${gate}, activated by ${transitPlanetNames(gate)}, is ${transitGateWindow(gate)}`);
       const channelDetails = transitChannels.map(channel => {
         const names = channel.reading?.name ? ` · ${channel.reading.name}` : '';
-        const bounds = channel.temporaryGates.map(gate => `Gate ${gate} ${transitGateWindow(gate)}`).join('; ');
-        return `Channel ${channel.label}${names} is temporarily complete (${bounds})`;
+        const bounds = channel.temporaryGates.map(gate => `gate ${gate} ${transitGateWindow(gate)}`).join(' and ');
+        return `the ${channel.label}${names} channel is temporarily complete while ${bounds}`;
       });
-      const centers = temporaryCenters.length ? ` The composite temporarily defines ${temporaryCenters.map(center => centerDescriptions[center]?.[0] || center).join(', ')}.` : '';
-      transitSection.textContent = `Transit deltas for ${frontName} as of ${asOf}: ${[...gateDetails, ...channelDetails].join('. ')}.${centers}`;
+      const centers = temporaryCenters.length ? ` Together, these activations temporarily define ${temporaryCenters.map(center => centerDescriptions[center]?.[0] || center).join(', ')}.` : '';
+      transitSection.textContent = `At ${asOf}, ${[...gateDetails, ...channelDetails].join('; ')}.${centers}`;
     }
     root.append(transitSection);
   }
 
-  for (const peer of peers) {
-    const frontGates = gates.get(readingPerson), peerGates = gates.get(peer);
-    const peerSummary = summarizeChart(peerGates, activations(peer));
-    const sharedGates = [...frontGates].filter(gate => peerGates.has(gate)).sort((a, b) => a - b);
-    const sharedChannels = channels.filter(channel => frontGates.has(channel.from) && frontGates.has(channel.to) && peerGates.has(channel.from) && peerGates.has(channel.to));
-    const complementary = channels.filter(channel => {
-      const frontHasFrom = frontGates.has(channel.from), frontHasTo = frontGates.has(channel.to);
-      const peerHasFrom = peerGates.has(channel.from), peerHasTo = peerGates.has(channel.to);
-      return (frontHasFrom && !frontHasTo && !peerHasFrom && peerHasTo) ||
-        (frontHasTo && !frontHasFrom && peerHasFrom && !peerHasTo);
-    });
-    const frontCompletePeerGate = channels.filter(channel => frontGates.has(channel.from) && frontGates.has(channel.to) && (peerGates.has(channel.from) !== peerGates.has(channel.to)));
-    const peerCompleteFrontGate = channels.filter(channel => peerGates.has(channel.from) && peerGates.has(channel.to) && (frontGates.has(channel.from) !== frontGates.has(channel.to)));
-    const item = document.createElement('p');
-    const facts = [`${sharedGates.length} shared gate${sharedGates.length === 1 ? '' : 's'}${sharedGates.length ? ` (${sharedGates.join(', ')})` : ''}`];
-    if (complementary.length) facts.push(`together complete ${complementary.map(channel => `${channel.label}${channel.reading?.name ? ` ${channel.reading.name}` : ''}`).join(', ')}`);
-    if (sharedChannels.length) facts.push(`both charts define ${sharedChannels.map(channel => channel.label).join(', ')}`);
-    if (frontCompletePeerGate.length) facts.push(`${personName(peer)} has the other gate of ${frontCompletePeerGate.map(channel => channel.label).join(', ')}, already defined in ${frontName}'s chart`);
-    if (peerCompleteFrontGate.length) facts.push(`${frontName} has a gate in ${personName(peer)}'s complete ${peerCompleteFrontGate.map(channel => channel.label).join(', ')}`);
-    const peerDefines = new Set(peerSummary?.definedCenters || []);
-    const frontDefines = new Set(summary.definedCenters);
-    const peerToFront = [...peerDefines].filter(center => !frontDefines.has(center));
-    const frontToPeer = [...frontDefines].filter(center => !peerDefines.has(center));
-    const centerName = center => centerDescriptions[center]?.[0] || center;
-    if (peerToFront.length) facts.push(`conditioning lens: ${personName(peer)} has defined ${peerToFront.map(centerName).join(', ')} center${peerToFront.length === 1 ? '' : 's'} where ${frontName}'s are not defined`);
-    if (frontToPeer.length) facts.push(`${frontName} has defined ${frontToPeer.map(centerName).join(', ')} center${frontToPeer.length === 1 ? '' : 's'} where ${personName(peer)}'s are not defined`);
+  const visiblePairs = overlappingChartPairs();
+  for (const [personA, personB] of visiblePairs) {
+    const gatesA = gates.get(personA) || gatesFor(personA), gatesB = gates.get(personB) || gatesFor(personB);
+    const nameA = personName(personA), nameB = personName(personB);
+    const summaryA = summarizeChart(gatesA, activations(personA));
+    const summaryB = summarizeChart(gatesB, activations(personB));
+    const sharedGates = [...gatesA].filter(gate => gatesB.has(gate)).sort((a, b) => a - b);
+    const sharedChannels = channels.filter(channel => gatesA.has(channel.from) && gatesA.has(channel.to) && gatesB.has(channel.from) && gatesB.has(channel.to));
+    const complementary = channels.filter(channel => (gatesA.has(channel.from) && !gatesA.has(channel.to) && !gatesB.has(channel.from) && gatesB.has(channel.to)) || (gatesA.has(channel.to) && !gatesA.has(channel.from) && !gatesB.has(channel.to) && gatesB.has(channel.from)));
+    const facts = [];
+    if (complementary.length) {
+      const descriptions = complementary.map(channel => {
+        const fromOwner = gatesA.has(channel.from) ? nameA : nameB;
+        const toOwner = gatesA.has(channel.to) ? nameA : nameB;
+        const title = channel.reading?.name ? ` (${channel.reading.name})` : '';
+        return `the ${channel.label}${title} channel: ${fromOwner} contributes Gate ${channel.from} and ${toOwner} contributes Gate ${channel.to}`;
+      });
+      facts.push(`Together, ${nameA} and ${nameB} complete ${descriptions.join('; ')}`);
+    }
+    if (sharedChannels.length) facts.push(`Both charts individually define ${sharedChannels.map(channel => `${channel.label}${channel.reading?.name ? ` ${channel.reading.name}` : ''}`).join(', ')}`);
+    if (sharedGates.length) facts.push(`They both activate gates ${sharedGates.join(', ')}`);
+    const centersA = new Set(summaryA?.definedCenters || []), centersB = new Set(summaryB?.definedCenters || []);
+    const onlyA = [...centersA].filter(center => !centersB.has(center)).map(center => centerDescriptions[center]?.[0] || center);
+    const onlyB = [...centersB].filter(center => !centersA.has(center)).map(center => centerDescriptions[center]?.[0] || center);
+    if (onlyA.length || onlyB.length) {
+      const contrasts = [];
+      if (onlyA.length) contrasts.push(`${nameA}'s chart defines ${onlyA.join(', ')}, which ${nameB}'s chart leaves open`);
+      if (onlyB.length) contrasts.push(`${nameB}'s chart defines ${onlyB.join(', ')}, which ${nameA}'s chart leaves open`);
+      facts.push(`Their defined centers differ: ${contrasts.join('; ')}`);
+    }
     if (transitToggle.checked && transitSnapshot) {
-      const peerActive = new Set([...peerGates, ...transitGates]);
+      const activeA = new Set([...gatesA, ...transitGates]);
+      const activeB = new Set([...gatesB, ...transitGates]);
       const temporaryConnections = channels.flatMap(channel => {
-        if (frontGates.has(channel.from) && frontGates.has(channel.to) || peerGates.has(channel.from) && peerGates.has(channel.to)) return [];
-        const links = [];
-        if (frontGates.has(channel.from) && peerActive.has(channel.to) || transitGates.has(channel.from) && peerActive.has(channel.to)) links.push({ frontGate: channel.from, peerGate: channel.to });
-        if (frontGates.has(channel.to) && peerActive.has(channel.from) || transitGates.has(channel.to) && peerActive.has(channel.from)) links.push({ frontGate: channel.to, peerGate: channel.from });
-        return links.filter(link => {
+        if (gatesA.has(channel.from) && gatesA.has(channel.to) || gatesB.has(channel.from) && gatesB.has(channel.to)) return [];
+        const directions = [[channel.from, channel.to], [channel.to, channel.from]];
+        return directions.flatMap(([gateA, gateB]) => {
+          if (!activeA.has(gateA) || !activeB.has(gateB) || (!gatesA.has(gateA) && !gatesB.has(gateB))) return [];
           const temporaryGates = [
-            ...(!frontGates.has(link.frontGate) && transitGates.has(link.frontGate) ? [link.frontGate] : []),
-            ...(!peerGates.has(link.peerGate) && transitGates.has(link.peerGate) ? [link.peerGate] : [])
+            ...(!gatesA.has(gateA) && transitGates.has(gateA) ? [gateA] : []),
+            ...(!gatesB.has(gateB) && transitGates.has(gateB) ? [gateB] : [])
           ];
-          const hasNatalContribution = frontGates.has(link.frontGate) || peerGates.has(link.peerGate);
-          if (!temporaryGates.length || !hasNatalContribution) return false;
-          link.temporaryGates = temporaryGates;
-          return true;
-        }).map(link => ({ channel, link }));
+          return temporaryGates.length ? [{ channel, temporaryGates }] : [];
+        });
       });
       if (temporaryConnections.length) {
-        const connectionText = temporaryConnections.map(({ channel, link }) => {
-          const gatesText = link.temporaryGates.map(gate => `Gate ${gate} (${transitPlanetNames(gate)}) ${transitGateWindow(gate)}`).join('; ');
-          return `${channel.label}${channel.reading?.name ? ` ${channel.reading.name}` : ''} is temporarily completed across the charts through ${gatesText}`;
+        const connectionText = temporaryConnections.map(({ channel, temporaryGates }) => {
+          const title = channel.reading?.name ? ` (${channel.reading.name})` : '';
+          const gatesText = temporaryGates.map(gate => `Gate ${gate}, activated by ${transitPlanetNames(gate)}, ${transitGateWindow(gate)}`).join(' and ');
+          return `the ${channel.label}${title} channel while ${gatesText}`;
         });
-        facts.push(`current transit connection: ${connectionText.join('; ')}`);
+        facts.push(`Current transits temporarily complete ${connectionText.join('; ')}`);
       }
     }
-    item.textContent = `With ${personName(peer)}: ${facts.join('; ')}.`;
+    const item = document.createElement('p');
+    item.textContent = facts.length
+      ? `${nameA} and ${nameB} overlap in this view. ${facts.join('. ')}.`
+      : `${nameA} and ${nameB} overlap in this view, but no shared gates or joint channel completions are present.`;
+    root.append(item);
+  }
+  if (!visiblePairs.length) {
+    const item = document.createElement('p');
+    item.textContent = `As the family turns, no two chart centers currently line up in this view. Rotate the scene to see each overlapping pair and its relationship channels.`;
     root.append(item);
   }
   const note = document.createElement('small');
-  note.textContent = 'A Human Design parenting lens: use strategy and center contrasts as questions for reflection, not fixed claims about a person. Transit end windows are ephemeris estimates and may change; this is not a compatibility verdict.';
+  note.textContent = 'These are Human Design prompts for reflection, not fixed claims about anyone or a compatibility verdict. Transit windows are estimates and can shift.';
   root.append(note);
 }
 controls.addEventListener('change', refreshFrontFamilyReading);
@@ -810,6 +824,7 @@ function refreshRelationshipPairing() {
   relationshipGroup.visible = document.querySelector('#showBridges').checked;
   const names = pairs.map(pair => pair.map(person => window.hdChartNames?.[person] || (person === 'daniel' ? 'Person 1' : person === 'camille' ? 'Person 2' : 'Child')).join('–'));
   setStatus(`${relationshipGroup.userData.bridgeCount} relationship channel bridge${relationshipGroup.userData.bridgeCount === 1 ? '' : 's'} between overlapping charts${names.length ? ` (${names.join(', ')})` : ''}.`);
+  frontFamilyReading();
 }
 function relationshipLinkSpecs(a, b, personA, personB, natalGates, transitGates) {
   const gatesA = natalGates[personA] || new Set();
