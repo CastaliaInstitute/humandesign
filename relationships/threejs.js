@@ -367,7 +367,27 @@ function getGatePoints(paths) {
   }
   return result;
 }
-function makeRelationshipGroup(danielData, camilleData, danielGates, camilleGates, separation) {
+function relationshipLinkSpecs(a, b, danielGates, camilleGates, transitGates) {
+  const danielActive = new Set([...danielGates, ...transitGates]);
+  const camilleActive = new Set([...camilleGates, ...transitGates]);
+  // Natal channels remain represented by each chart. Transits may add a
+  // temporary cross-chart bridge, but a channel supplied only by the shared
+  // transit sky is not a relationship-specific contribution.
+  if ((danielGates.has(a) && danielGates.has(b)) || (camilleGates.has(a) && camilleGates.has(b))) return [];
+  const links = [];
+  if (danielActive.has(a) && camilleActive.has(b) && (danielGates.has(a) || camilleGates.has(b))) {
+    links.push({ fromPerson: 'daniel', fromGate: a, toPerson: 'camille', toGate: b });
+  }
+  if (camilleActive.has(a) && danielActive.has(b) && (camilleGates.has(a) || danielGates.has(b))) {
+    links.push({ fromPerson: 'camille', fromGate: a, toPerson: 'daniel', toGate: b });
+  }
+  return links;
+}
+function snapshotPlanetNames(snapshot, gate) {
+  const planets = snapshot?.gatePlanets?.[gate] || [];
+  return planets.length ? ` (${planets.join(', ')})` : '';
+}
+function makeRelationshipGroup(danielData, camilleData, danielGates, camilleGates, separation, transitSnapshot) {
   const group = new THREE.Group();
   group.name = 'Relationship-completed channels · middle plane';
   const gatePointsD = getGatePoints(danielData.paths);
@@ -382,6 +402,23 @@ function makeRelationshipGroup(danielData, camilleData, danielGates, camilleGate
   const gold = lineMaterial(new THREE.Color('#eab64b'), 0.98);
   const blue = lineMaterial(colors.daniel, 0.9);
   const pink = lineMaterial(colors.camille, 0.9);
+  const transitPurple = lineMaterial(new THREE.Color('#7c3aed'), 0.95);
+  const transitGates = new Set(transitSnapshot?.gates || []);
+  const natalGates = { daniel: danielGates, camille: camilleGates };
+  const gatePoints = { daniel: gatePointsD, camille: gatePointsC };
+  const planeZ = { daniel: danielZ, camille: camilleZ };
+  const personColors = { daniel: blue, camille: pink };
+  const personNames = {
+    daniel: window.hdChartNames?.daniel || 'Person 1',
+    camille: window.hdChartNames?.camille || 'Person 2'
+  };
+  const gateMarkerMaterial = (person, gate) => natalGates[person].has(gate) ? personColors[person] : transitPurple;
+  const gateSourceDescription = (person, gate) => {
+    const sources = [];
+    if (natalGates[person].has(gate)) sources.push('natal');
+    if (transitGates.has(gate)) sources.push(`transit${snapshotPlanetNames(transitSnapshot, gate)}`);
+    return `Gate ${gate}: ${personNames[person]} (${sources.join(' + ')})`;
+  };
   let bridgeCount = 0;
   for (const path of danielData.paths) {
     const node = path.userData.node;
@@ -390,29 +427,32 @@ function makeRelationshipGroup(danielData, camilleData, danielGates, camilleGate
     const channel = channelGroup(node);
     if (!channel || !path.subPaths?.length) continue;
     const a = +channel.dataset.from, b = +channel.dataset.to;
-    const dA = danielGates.has(a), dB = danielGates.has(b);
-    const cA = camilleGates.has(a), cB = camilleGates.has(b);
-    const hasCrossPair = (dA && cB) || (dB && cA);
-    const alreadyComplete = (dA && dB) || (cA && cB);
-    if (!hasCrossPair || alreadyComplete) continue;
+    const specs = relationshipLinkSpecs(a, b, danielGates, camilleGates, transitGates);
+    if (!specs.length) continue;
     bridgeCount++;
     const channelId = `${Math.min(a, b)}-${Math.max(a, b)}`;
     const reading = relationshipChannelReadings[channelId] || channelDescriptions.get(channelId);
-    const contributors = [a, b].map(gate => {
-      const people = [];
-      if (danielGates.has(gate)) people.push(window.hdChartNames?.daniel || 'Person 1');
-      if (camilleGates.has(gate)) people.push(window.hdChartNames?.camille || 'Person 2');
-      return `Gate ${gate}: ${people.join(' + ')}`;
-    });
+    const title = `Relationship channel ${a}–${b}${reading?.name ? ` · ${reading.name}` : ''}`;
+    const links = [];
+    for (const spec of specs) {
+      const from = gatePoints[spec.fromPerson].get(spec.fromGate);
+      const to = gatePoints[spec.toPerson].get(spec.toGate);
+      links.push({
+        ...spec,
+        from,
+        to,
+        fromZ: planeZ[spec.fromPerson] + gateMarkerZ,
+        toZ: planeZ[spec.toPerson] + gateMarkerZ,
+        fromMaterial: gateMarkerMaterial(spec.fromPerson, spec.fromGate),
+        toMaterial: gateMarkerMaterial(spec.toPerson, spec.toGate)
+      });
+    }
+    const contributors = links.map(link => `${gateSourceDescription(link.fromPerson, link.fromGate)} ↔ ${gateSourceDescription(link.toPerson, link.toGate)}`);
     const detail = [
       reading?.description || 'These two gates join the connected centers in the Human Design BodyGraph.',
-      `Cross-chart bridge · ${contributors.join(' · ')}. The two charts supply one gate each; this describes a shared composite connection, not a prediction about the relationship.`
+      `Cross-chart bridge · ${contributors.join(' · ')}. Natal and current transit activations are shown separately; a channel completed only by the shared transit sky is not counted as a relationship bridge.`
     ].join(' ');
-    const title = `Relationship channel ${a}–${b}${reading?.name ? ` · ${reading.name}` : ''}`;
     const tip = hoverInfo(`relationship:channel:${channelId}`, title, detail);
-    const links = [];
-    if (dA && cB) links.push({ from: gatePointsC.get(a), fromGate: a, fromZ: camilleZ + gateMarkerZ, fromMaterial: pink, to: gatePointsD.get(b), toGate: b, toZ: danielZ + gateMarkerZ, toMaterial: blue });
-    if (cA && dB) links.push({ from: gatePointsD.get(a), fromGate: a, fromZ: danielZ + gateMarkerZ, fromMaterial: blue, to: gatePointsC.get(b), toGate: b, toZ: camilleZ + gateMarkerZ, toMaterial: pink });
     const sourceStart = gatePointsD.get(a);
     const sourceEnd = gatePointsD.get(b);
     for (const link of links) {
@@ -524,13 +564,9 @@ function rebuildRelationship() {
   const sharedChannels = new Set([...sourceDocument.querySelectorAll('.channel-group[data-from][data-to]')]
     .filter(channel => danielGates.has(+channel.dataset.from) && danielGates.has(+channel.dataset.to) && camilleGates.has(+channel.dataset.from) && camilleGates.has(+channel.dataset.to))
     .map(channel => `${Math.min(+channel.dataset.from, +channel.dataset.to)}-${Math.max(+channel.dataset.from, +channel.dataset.to)}`));
+  const transitGates = new Set(transitSnapshot?.gates || []);
   const relationshipChannels = new Set([...sourceDocument.querySelectorAll('.person--daniel .channel-group[data-from][data-to]')]
-    .filter(channel => {
-      const a = +channel.dataset.from, b = +channel.dataset.to;
-      const crossPair = (danielGates.has(a) && camilleGates.has(b)) || (danielGates.has(b) && camilleGates.has(a));
-      const alreadyComplete = (danielGates.has(a) && danielGates.has(b)) || (camilleGates.has(a) && camilleGates.has(b));
-      return crossPair && !alreadyComplete;
-    })
+    .filter(channel => relationshipLinkSpecs(+channel.dataset.from, +channel.dataset.to, danielGates, camilleGates, transitGates).length > 0)
     .map(channel => `${Math.min(+channel.dataset.from, +channel.dataset.to)}-${Math.max(+channel.dataset.from, +channel.dataset.to)}`));
   const layers = {};
   for (const person of ['daniel', 'camille']) {
@@ -547,7 +583,7 @@ function rebuildRelationship() {
   planeGroups.camille.position.z = -planeGroups.daniel.position.z;
   document.querySelector('#separationValue').value = String(separation);
   releaseGroup(relationshipGroup);
-  relationshipGroup = makeRelationshipGroup(layers.daniel, layers.camille, danielGates, camilleGates, separation);
+  relationshipGroup = makeRelationshipGroup(layers.daniel, layers.camille, danielGates, camilleGates, separation, transitSnapshot);
   chartRoot.add(relationshipGroup);
   relationshipGroup.visible = document.querySelector('#showBridges').checked;
   for (const person of ['daniel', 'camille']) {
