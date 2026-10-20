@@ -212,7 +212,7 @@ let selectedProfiles = [
 ];
 fillBirthFields(selectedProfiles[0], 'A'); fillBirthFields(selectedProfiles[1], 'B');
 displayProfile(selectedProfiles[0], 'daniel'); displayProfile(selectedProfiles[1], 'camille');
-async function applyProfiles() {
+async function applyProfiles(signedInChart = false) {
   const [baseA, baseB] = selectedProfiles;
   if (!baseA || !baseB) return;
   const a = profileFromBirthFields(baseA, 'A');
@@ -226,7 +226,19 @@ async function applyProfiles() {
     document.querySelector('#camilleGates').dispatchEvent(new Event('input', { bubbles: true }));
     displayProfile(a, 'daniel'); displayProfile(b, 'camille');
     status(`${names.daniel} and ${names.camille} charts calculated. Form edits are saved in this browser.`);
-  } catch (error) { status(error.message); }
+    if (signedInChart && signedInProfilesPending) {
+      signedInProfilesPending = false;
+      window.hdNatalProfilesReady = true;
+      window.dispatchEvent(new Event('castalia-natal-profiles-ready'));
+    }
+  } catch (error) {
+    status(error.message);
+    if (signedInChart && signedInProfilesPending) {
+      signedInProfilesPending = false;
+      window.hdNatalProfilesError = error.message;
+      window.dispatchEvent(new Event('castalia-natal-profiles-ready'));
+    }
+  }
 }
 void applyProfiles();
 function installProfileOptions(profiles, login) {
@@ -242,11 +254,29 @@ function installProfileOptions(profiles, login) {
     const needsReview = selectedProfiles.some(p => !/exact|recorded|confirmed/i.test(p.birth_time_status || ''));
     birthDetailsButton.hidden = false;
     showBirthDetails(needsReview);
-    void applyProfiles();
+    signedInProfilesPending = true;
+    window.hdNatalProfilesReady = false;
+    window.hdNatalProfilesError = '';
+    void applyProfiles(Boolean(loadedUser));
   };
   personA.onchange = update; personB.onchange = update; update();
 }
 let supabase = null, loadedUser = null;
+let signedInProfilesPending = false;
+window.hdNatalProfilesReady = false;
+window.hdNatalProfilesError = '';
+window.CastaliaHumanDesignAuth = {
+  isConfigured: () => Boolean(supabase),
+  async getAccessToken() {
+    if (!supabase) return null;
+    const { data, error } = await supabase.auth.getSession();
+    if (error) throw error;
+    return data.session?.access_token || null;
+  }
+};
+function publishAuthState(session) {
+  window.dispatchEvent(new CustomEvent('castalia-auth-change', { detail: { signedIn: Boolean(session?.user) } }));
+}
 if (config.supabaseUrl && config.supabaseAnonKey) {
   supabase = createClient(config.supabaseUrl, config.supabaseAnonKey, { auth: { flowType: 'pkce', persistSession: true, autoRefreshToken: true } });
   loginButton.addEventListener('click', async () => {
@@ -255,8 +285,8 @@ if (config.supabaseUrl && config.supabaseAnonKey) {
     if (error) status(error.message);
   });
   logoutButton.addEventListener('click', async () => { await supabase.auth.signOut(); location.reload(); });
-  supabase.auth.onAuthStateChange((_event, session) => { void handleSession(session); });
-  supabase.auth.getSession().then(({ data }) => handleSession(data.session));
+  supabase.auth.onAuthStateChange((_event, session) => { publishAuthState(session); void handleSession(session); });
+  supabase.auth.getSession().then(({ data }) => { publishAuthState(data.session); void handleSession(data.session); });
 } else { loginButton.disabled = true; status('Showing Daniel and Camille as example charts. Castalia sign-in is not configured yet.'); }
 birthDetailsButton.addEventListener('click', () => showBirthDetails(birthDetails.hidden));
 if (menuToggle && authMenu) {
@@ -274,19 +304,35 @@ if (menuToggle && authMenu) {
     }
   });
 }
-document.querySelector('#applyBirthDetails').addEventListener('click', () => { void applyProfiles(); });
+document.querySelector('#applyBirthDetails').addEventListener('click', () => {
+  if (loadedUser) {
+    signedInProfilesPending = true;
+    window.hdNatalProfilesReady = false;
+    window.hdNatalProfilesError = '';
+  }
+  void applyProfiles(Boolean(loadedUser));
+});
 async function handleSession(session) {
   if (!session?.user || !supabase) return;
   const login = session.user.user_metadata?.user_name || session.user.user_metadata?.preferred_username || session.user.user_metadata?.login;
   if (!login) { status('Castalia sign-in succeeded, but GitHub did not provide a username.'); return; }
   if (loadedUser === session.user.id) return;
   loadedUser = session.user.id; loginButton.hidden = true; logoutButton.hidden = false;
+  window.hdNatalProfilesReady = false;
+  window.hdNatalProfilesError = '';
   status(`Signed in as ${login}; finding your family natal data…`);
   try {
     const family = await loadFamilyDocument(login, session.provider_token);
     const profiles = profilesFrom(family);
     if (!profiles.length) throw new Error('The GitHub family profile has no complete natal records.');
+    signedInProfilesPending = true;
     installProfileOptions(profiles, login);
     document.querySelector('#profilePicker').hidden = false;
-  } catch (error) { loadedUser = null; status(error.message); }
+  } catch (error) {
+    loadedUser = null;
+    signedInProfilesPending = false;
+    window.hdNatalProfilesError = error.message;
+    window.dispatchEvent(new Event('castalia-natal-profiles-ready'));
+    status(error.message);
+  }
 }
