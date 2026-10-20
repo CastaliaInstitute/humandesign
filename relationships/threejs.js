@@ -1252,12 +1252,15 @@ function resize() {
   const furthestChild = childPlaneRadius();
   const chartWidth = 388.8 * familyLayout.parentScale;
   const chartHeight = chartViewHeight * familyLayout.parentScale;
-  // Keep each graph near one fifth of the viewport width, while fitting the
-  // complete family footprint and chart height at every aspect ratio.
-  const desiredHalfWidth = chartWidth / 0.2;
-  const familyHalfWidth = furthestChild + chartWidth / 2 + 8;
-  const halfWidth = Math.max(desiredHalfWidth, familyHalfWidth);
-  const halfHeight = Math.max(chartHeight / 2 + 8, halfWidth / aspect);
+  // Fit four chart columns horizontally and the full chart height vertically.
+  // In portrait layouts, constrain width by the canvas height so aspect ratio
+  // does not make the family collapse to a tiny cluster.
+  const halfHeight = chartHeight / 2 + 8;
+  const halfWidth = Math.max(
+    chartWidth / 0.4,
+    furthestChild + chartWidth / 2 + 8,
+    halfHeight * aspect
+  );
   camera.left = -halfWidth;
   camera.right = halfWidth;
   camera.top = halfHeight;
