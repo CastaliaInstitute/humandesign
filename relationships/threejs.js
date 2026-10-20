@@ -58,6 +58,7 @@ const flowAnimations = [];
 const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 const colors = { daniel: new THREE.Color('#087fa5'), camille: new THREE.Color('#cf4f79') };
 const childPalette = ['#488f73', '#b67a37', '#7864a6', '#518a9d'].map(color => new THREE.Color(color));
+const familyLayout = { parentScale: 0.62, childScale: 0.42, parentRadius: 210, childRadius: 220 };
 function chartColor(person) {
   if (colors[person]) return colors[person];
   const childIndex = Math.max(0, familyChildren.findIndex(child => child.id === person));
@@ -493,7 +494,7 @@ function makePlaneGroup(paths, person, sharedChannels, relationshipChannels, opt
   group.position.set(-194.4, 194.4, 0);
   if (options.scale) {
     group.scale.set(options.scale, -options.scale, options.scale);
-    group.position.set(-194.4 * options.scale + (options.offsetX || 0), 194.4 * options.scale, 0);
+    group.position.set(-194.4 * options.scale + (options.offsetX || 0), 194.4 * options.scale + (options.offsetY || 0), 0);
   }
   return group;
 }
@@ -539,6 +540,25 @@ function getGatePoints(paths) {
     result.set(+gate.dataset.gate, center);
   }
   return result;
+}
+function chartPointInFamily(point, person) {
+  const childIndex = familyChildren.findIndex(child => child.id === person);
+  const isChild = childIndex >= 0;
+  const scale = isChild ? familyLayout.childScale : familyLayout.parentScale;
+  let centerX = 0, centerY = 0;
+  if (isChild) {
+    const side = childIndex % 2 === 0 ? 1 : -1;
+    const row = Math.floor(childIndex / 2);
+    centerX = side * familyLayout.childRadius;
+    centerY = row === 0 ? 0 : -95 * Math.ceil(row / 2) * (row % 2 ? 1 : -1);
+  } else {
+    centerY = person === 'daniel' ? familyLayout.parentRadius : -familyLayout.parentRadius;
+  }
+  return new THREE.Vector3(
+    point.x * scale - 194.4 * scale + centerX,
+    -point.y * scale + 194.4 * scale + centerY,
+    0
+  );
 }
 function relationshipLinkSpecs(a, b, danielGates, camilleGates, transitGates) {
   const danielActive = new Set([...danielGates, ...transitGates]);
@@ -612,8 +632,8 @@ function makeRelationshipGroup(danielData, camilleData, danielGates, camilleGate
       const to = gatePoints[spec.toPerson].get(spec.toGate);
       links.push({
         ...spec,
-        from,
-        to,
+        from: from && chartPointInFamily(from, spec.fromPerson),
+        to: to && chartPointInFamily(to, spec.toPerson),
         fromZ: planeZ[spec.fromPerson] + gateMarkerZ,
         toZ: planeZ[spec.toPerson] + gateMarkerZ,
         fromMaterial: gateMarkerMaterial(spec.fromPerson, spec.fromGate),
@@ -637,14 +657,16 @@ function makeRelationshipGroup(danielData, camilleData, danielGates, camilleGate
       const startsAtA = distance(route[0], sourceStart) <= distance(route[route.length - 1], sourceStart);
       const shouldReverse = link.fromGate === a ? !startsAtA : startsAtA;
       if (shouldReverse) route = route.reverse();
-      const first = route[0], last = route[route.length - 1];
+      const first = chartPointInFamily(route[0], 'daniel');
+      const last = chartPointInFamily(route[route.length - 1], 'daniel');
       const startDx = link.from.x - first.x, startDy = link.from.y - first.y;
       const endDx = link.to.x - last.x, endDy = link.to.y - last.y;
       const points = route.map((point, index) => {
         const t = index / (route.length - 1);
+        const familyPoint = chartPointInFamily(point, 'daniel');
         return new THREE.Vector3(
-          point.x + startDx * (1 - t) + endDx * t,
-          point.y + startDy * (1 - t) + endDy * t,
+          familyPoint.x + startDx * (1 - t) + endDx * t,
+          familyPoint.y + startDy * (1 - t) + endDy * t,
           link.fromZ + (link.toZ - link.fromZ) * t
         );
       });
@@ -667,8 +689,6 @@ function makeRelationshipGroup(danielData, camilleData, danielGates, camilleGate
       }
     }
   }
-  group.scale.y = -1;
-  group.position.set(-194.4, 194.4, 0);
   group.userData.bridgeCount = bridgeCount;
   return group;
 }
@@ -755,7 +775,10 @@ function rebuildRelationship() {
     const data = loader.parse(extractLayer(sourceDocument, person, person === 'daniel' ? danielGates : camilleGates));
     layers[person] = data;
     releaseGroup(planeGroups[person]);
-    const group = makePlaneGroup(data.paths, person, sharedChannels, relationshipChannels);
+    const centerY = person === 'daniel' ? familyLayout.parentRadius : -familyLayout.parentRadius;
+    const group = makePlaneGroup(data.paths, person, sharedChannels, relationshipChannels, {
+      scale: familyLayout.parentScale, offsetY: centerY
+    });
     planeGroups[person] = group;
     chartRoot.add(group);
   }
@@ -774,8 +797,9 @@ function rebuildRelationship() {
   for (const person of ['daniel', 'camille']) {
     const gates = person === 'daniel' ? danielGates : camilleGates;
     const activations = window.hdNatalPlanetaryActivations?.[person] || [];
-    const x = person === 'daniel' ? -82 : 82;
-    const label = makeSummaryLabel(person, gates, activations, colors[person], x, 207, planeGroups[person].position.z + 7);
+    const centerY = person === 'daniel' ? familyLayout.parentRadius : -familyLayout.parentRadius;
+    const labelY = centerY + (person === 'daniel' ? 140 : -140);
+    const label = makeSummaryLabel(person, gates, activations, colors[person], 0, labelY, planeGroups[person].position.z + 7, familyLayout.parentScale);
     if (label) {
       label.visible = document.querySelector(person === 'daniel' ? '#showDaniel' : '#showCamille').checked;
       summaryLabels[person] = label;
@@ -797,6 +821,9 @@ function rebuildRelationship() {
       const activations = new Set([...natalGates, ...transitSnapshot.gates]);
       const transitData = loader.parse(extractLayer(sourceDocument, person, activations));
       const group = makeTransitGroup(transitData, transitSnapshot, natalGates, person);
+      const centerY = person === 'daniel' ? familyLayout.parentRadius : -familyLayout.parentRadius;
+      group.scale.set(familyLayout.parentScale, -familyLayout.parentScale, familyLayout.parentScale);
+      group.position.set(-194.4 * familyLayout.parentScale, 194.4 * familyLayout.parentScale + centerY, 0);
       group.position.z = planeGroups[person].position.z;
       transitGroups[person] = group;
       chartRoot.add(group);
@@ -804,23 +831,26 @@ function rebuildRelationship() {
     }
   }
   familyChildren.forEach((child, index) => {
-    const offsetX = 102 + index * 66;
+    const side = index % 2 === 0 ? 1 : -1;
+    const row = Math.floor(index / 2);
+    const offsetX = side * familyLayout.childRadius;
+    const offsetY = row === 0 ? 0 : -95 * Math.ceil(row / 2) * (row % 2 ? 1 : -1);
     const childData = loader.parse(extractLayer(sourceDocument, 'daniel', new Set(child.gates)));
     const color = childPalette[index % childPalette.length];
     const childGroup = makePlaneGroup(childData.paths, child.id, new Set(), new Set(), {
-      color, name: child.name, scale: 0.48, offsetX
+      color, name: child.name, scale: familyLayout.childScale, offsetX, offsetY
     });
     childGroup.position.z = 0;
     familyGroups[child.id] = childGroup;
     chartRoot.add(childGroup);
-    const childLabel = makeSummaryLabel(child.id, new Set(child.gates), child.activations || [], color, offsetX, 110, 7, 0.68);
+    const childLabel = makeSummaryLabel(child.id, new Set(child.gates), child.activations || [], color, offsetX, offsetY + 100, 7, 0.58);
     if (childLabel) { summaryLabels[child.id] = childLabel; chartRoot.add(childLabel); }
     if (transitSnapshot) {
       const activations = new Set([...child.gates, ...transitSnapshot.gates]);
       const transitData = loader.parse(extractLayer(sourceDocument, 'daniel', activations));
       const transitGroup = makeTransitGroup(transitData, transitSnapshot, new Set(child.gates), child.id);
-      transitGroup.scale.set(0.48, -0.48, 0.48);
-      transitGroup.position.set(-194.4 * 0.48 + offsetX, 194.4 * 0.48, 0);
+      transitGroup.scale.set(familyLayout.childScale, -familyLayout.childScale, familyLayout.childScale);
+      transitGroup.position.set(-194.4 * familyLayout.childScale + offsetX, 194.4 * familyLayout.childScale + offsetY, 0);
       transitGroup.position.z = 0;
       transitGroups[child.id] = transitGroup;
       chartRoot.add(transitGroup);
@@ -855,9 +885,10 @@ function resize() {
   if (!rect.width || !rect.height) return;
   renderer.setSize(rect.width, rect.height, false);
   const aspect = rect.width / rect.height;
-  const outerChildOffset = 102 + Math.max(0, familyChildren.length - 1) * 66;
-  const halfWidth = Math.max(300 * aspect, outerChildOffset + 55, 165);
-  const halfHeight = Math.max(300, halfWidth / aspect);
+  const childRows = Math.ceil(familyChildren.length / 2);
+  const childVerticalOffset = childRows > 1 ? Math.ceil((childRows - 1) / 2) * 95 : 0;
+  const halfWidth = Math.max(300 * aspect, familyLayout.childRadius + 194.4 * familyLayout.childScale + 35, 165);
+  const halfHeight = Math.max(familyLayout.parentRadius + 194.4 * familyLayout.parentScale + 35, 194.4 * familyLayout.childScale + childVerticalOffset + 35, halfWidth / aspect);
   camera.left = -halfWidth;
   camera.right = halfWidth;
   camera.top = halfHeight;
