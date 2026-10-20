@@ -35,6 +35,7 @@ lockOrbitElevation();
 const chartRoot = new THREE.Group();
 scene.add(chartRoot);
 const planeGroups = {};
+const summaryLabels = {};
 let relationshipGroup = null;
 const transitGroups = {};
 const familyGroups = {};
@@ -66,6 +67,83 @@ function gatesFor(person) {
   if (person === 'daniel') return parseGateList('#danielGates');
   if (person === 'camille') return parseGateList('#camilleGates');
   return new Set(familyChildren.find(child => child.id === person)?.gates || []);
+}
+function summarizeChart(gates, activations) {
+  const template = sourceDocument?.querySelector('.person--daniel');
+  if (!template) return null;
+  const gateCenters = new Map([...template.querySelectorAll('.gate[data-gate][data-center]')]
+    .map(gate => [+gate.dataset.gate, gate.dataset.center]));
+  const adjacent = new Map();
+  const definedCenters = new Set();
+  const connect = (a, b) => {
+    if (!adjacent.has(a)) adjacent.set(a, new Set());
+    if (!adjacent.has(b)) adjacent.set(b, new Set());
+    adjacent.get(a).add(b); adjacent.get(b).add(a);
+    definedCenters.add(a); definedCenters.add(b);
+  };
+  for (const channel of template.querySelectorAll('.channel-group[data-from][data-to]')) {
+    const from = +channel.dataset.from, to = +channel.dataset.to;
+    if (!gates.has(from) || !gates.has(to)) continue;
+    const fromCenter = gateCenters.get(from), toCenter = gateCenters.get(to);
+    if (fromCenter && toCenter) connect(fromCenter, toCenter);
+  }
+  const centersConnected = (a, b) => {
+    const pending = [a], visited = new Set();
+    while (pending.length) {
+      const center = pending.pop();
+      if (center === b) return true;
+      if (visited.has(center)) continue;
+      visited.add(center);
+      pending.push(...(adjacent.get(center) || []));
+    }
+    return false;
+  };
+  const motorToThroat = ['root', 'sacral', 'ego', 'solar'].some(center => definedCenters.has(center) && centersConnected(center, 'throat'));
+  let type = 'Reflector';
+  if (definedCenters.size) {
+    if (definedCenters.has('sacral')) type = motorToThroat ? 'Manifesting Generator' : 'Generator';
+    else type = motorToThroat ? 'Manifestor' : 'Projector';
+  }
+  let authority = 'Mental';
+  if (definedCenters.has('solar')) authority = 'Emotional';
+  else if (definedCenters.has('sacral')) authority = 'Sacral';
+  else if (definedCenters.has('spleen')) authority = 'Splenic';
+  else if (definedCenters.has('ego')) authority = 'Ego';
+  else if (definedCenters.has('g') && centersConnected('g', 'throat')) authority = 'Self-Projected';
+  else if (type === 'Reflector') authority = 'Lunar';
+  const personalitySun = activations.find(item => item.type === 'personality' && item.planet === 'sun');
+  const designSun = activations.find(item => item.type === 'design' && item.planet === 'sun');
+  const profile = personalitySun && designSun ? `${personalitySun.line}/${designSun.line}` : '';
+  return { type, authority, profile, label: `${profile ? `${profile} · ` : ''}${authority} ${type}` };
+}
+function makeSummaryLabel(person, gates, activations, color, x, y, z, scale = 1) {
+  const summary = summarizeChart(gates, activations);
+  if (!summary) return null;
+  const owner = window.hdChartNames?.[person] || (person === 'daniel' ? 'Person 1' : person === 'camille' ? 'Person 2' : 'Child');
+  const canvas = document.createElement('canvas');
+  canvas.width = 520; canvas.height = 108;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = 'rgba(255,253,247,.96)';
+  ctx.beginPath(); ctx.roundRect(3, 3, 514, 102, 18); ctx.fill();
+  ctx.strokeStyle = color.getStyle(); ctx.lineWidth = 5; ctx.stroke();
+  ctx.fillStyle = '#746e61'; ctx.font = '600 22px system-ui, sans-serif';
+  ctx.textAlign = 'left'; ctx.textBaseline = 'middle'; ctx.fillText(owner, 22, 36, 476);
+  ctx.fillStyle = '#292820';
+  let summaryFontSize = 32;
+  ctx.font = `700 ${summaryFontSize}px system-ui, sans-serif`;
+  while (ctx.measureText(summary.label).width > 476 && summaryFontSize > 21) {
+    summaryFontSize--;
+    ctx.font = `700 ${summaryFontSize}px system-ui, sans-serif`;
+  }
+  ctx.fillText(summary.label, 22, 76, 476);
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  const label = new THREE.Sprite(new THREE.SpriteMaterial({ map: texture, transparent: true, depthTest: false, depthWrite: false }));
+  label.scale.set(150 * scale, 31 * scale, 1);
+  label.position.set(x, y, z);
+  label.renderOrder = 20;
+  label.userData.summary = summary;
+  return label;
 }
 const pale = new THREE.Color('#fffcf5');
 const gray = new THREE.Color('#96928a');
@@ -713,10 +791,25 @@ function rebuildRelationship() {
     releaseGroup(group);
     delete familyGroups[person];
   }
+  for (const [person, label] of Object.entries(summaryLabels)) {
+    releaseGroup(label);
+    delete summaryLabels[person];
+  }
   const separation = Number(document.querySelector('#separation').value);
   const half = separation / 2;
   planeGroups.daniel.position.z = frontPerson === 'daniel' ? half : -half;
   planeGroups.camille.position.z = -planeGroups.daniel.position.z;
+  for (const person of ['daniel', 'camille']) {
+    const gates = person === 'daniel' ? danielGates : camilleGates;
+    const activations = window.hdNatalPlanetaryActivations?.[person] || [];
+    const x = person === 'daniel' ? -82 : 82;
+    const label = makeSummaryLabel(person, gates, activations, colors[person], x, 207, planeGroups[person].position.z + 7);
+    if (label) {
+      label.visible = document.querySelector(person === 'daniel' ? '#showDaniel' : '#showCamille').checked;
+      summaryLabels[person] = label;
+      chartRoot.add(label);
+    }
+  }
   document.querySelector('#separationValue').value = String(separation);
   releaseGroup(relationshipGroup);
   relationshipGroup = makeRelationshipGroup(layers.daniel, layers.camille, danielGates, camilleGates, separation, transitSnapshot);
@@ -750,6 +843,8 @@ function rebuildRelationship() {
     childGroup.position.z = 0;
     familyGroups[child.id] = childGroup;
     chartRoot.add(childGroup);
+    const childLabel = makeSummaryLabel(child.id, new Set(child.gates), child.activations || [], color, offsetX, 110, 7, 0.68);
+    if (childLabel) { summaryLabels[child.id] = childLabel; chartRoot.add(childLabel); }
     if (transitSnapshot) {
       const activations = new Set([...child.gates, ...transitSnapshot.gates]);
       const transitData = loader.parse(extractLayer(sourceDocument, 'daniel', activations));
@@ -791,7 +886,7 @@ function resize() {
   renderer.setSize(rect.width, rect.height, false);
   const aspect = rect.width / rect.height;
   const outerChildOffset = 102 + Math.floor(Math.max(0, familyChildren.length - 1) / 2) * 66;
-  const halfWidth = Math.max(300 * aspect, outerChildOffset + 36);
+  const halfWidth = Math.max(300 * aspect, outerChildOffset + 55, 165);
   const halfHeight = Math.max(300, halfWidth / aspect);
   camera.left = -halfWidth;
   camera.right = halfWidth;
@@ -947,8 +1042,14 @@ resizeObserver.observe(canvas);
 document.querySelector('#separation').addEventListener('input', e => setSeparation(e.target.value));
 for (const selector of ['#danielGates', '#camilleGates']) document.querySelector(selector).addEventListener('input', () => { clearTimeout(rebuildTimer); rebuildTimer = setTimeout(rebuildRelationship, 220); });
 document.querySelector('#showBridges').addEventListener('change', e => { if (relationshipGroup) relationshipGroup.visible = e.target.checked; });
-document.querySelector('#showDaniel').addEventListener('change', e => { if (planeGroups.daniel) planeGroups.daniel.visible = e.target.checked; });
-document.querySelector('#showCamille').addEventListener('change', e => { if (planeGroups.camille) planeGroups.camille.visible = e.target.checked; });
+document.querySelector('#showDaniel').addEventListener('change', e => {
+  if (planeGroups.daniel) planeGroups.daniel.visible = e.target.checked;
+  if (summaryLabels.daniel) summaryLabels.daniel.visible = e.target.checked;
+});
+document.querySelector('#showCamille').addEventListener('change', e => {
+  if (planeGroups.camille) planeGroups.camille.visible = e.target.checked;
+  if (summaryLabels.camille) summaryLabels.camille.visible = e.target.checked;
+});
 transitToggle.addEventListener('change', e => {
   for (const group of Object.values(transitGroups)) group.visible = e.target.checked;
   try { localStorage.setItem('castalia-hd-show-transits', String(e.target.checked)); }
