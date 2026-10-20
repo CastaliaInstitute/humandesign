@@ -42,17 +42,19 @@ lockOrbitElevation();
 
 const chartRoot = new THREE.Group();
 scene.add(chartRoot);
-// Rotate the whole family layout around its shared center. Keeping the camera
-// fixed preserves the exact-overlap front view as the starting orientation.
+// Rotate the family centers around their shared axis; chart planes counter-rotate
+// so every BodyGraph stays facing the camera throughout the turn.
 let familyAzimuth = 0;
 function rotateFamily(step) {
   familyAzimuth += step;
   chartRoot.rotation.y = familyAzimuth;
+  syncChartFacing();
   refreshFrontFamilyReading();
 }
 const planeGroups = {};
 let relationshipGroup = null;
 let activeRelationshipPairKey = '';
+let lastRelationshipFacingAngle = null;
 let currentChartData = null;
 let currentNatalGates = null;
 let currentTransitSnapshot = null;
@@ -89,6 +91,33 @@ function chartColor(person) {
   if (colors[person]) return colors[person];
   const childIndex = Math.max(0, familyChildren.findIndex(child => child.id === person));
   return childPalette[childIndex % childPalette.length];
+}
+function cameraAzimuth() {
+  const offset = camera.position.clone().sub(controls.target);
+  return Math.atan2(offset.x, offset.z);
+}
+function orientPlaneToCamera(group, scale, flipX, parentYaw = 0, centerZ = 0) {
+  if (!group) return;
+  const facingYaw = cameraAzimuth() - familyAzimuth - parentYaw;
+  const centerLocalX = (flipX ? -1 : 1) * 194.4 * scale;
+  group.rotation.y = facingYaw;
+  group.position.x = -centerLocalX * Math.cos(facingYaw);
+  group.position.z = centerZ + centerLocalX * Math.sin(facingYaw);
+}
+function syncChartFacing() {
+  for (const person of ['daniel', 'camille']) {
+    const centerZ = person === frontPerson ? familyLayout.parentRadius : -familyLayout.parentRadius;
+    orientPlaneToCamera(planeGroups[person], familyLayout.parentScale, false, 0, centerZ);
+    orientPlaneToCamera(transitGroups[person], familyLayout.parentScale, false, 0, centerZ);
+  }
+  familyChildren.forEach((child, index) => {
+    const parent = familyGroups[child.id];
+    if (!parent) return;
+    const flipX = index % 2 === 1;
+    const chart = parent.children.find(item => item.name.includes('SVG plane'));
+    orientPlaneToCamera(chart, familyLayout.childScale, flipX, parent.rotation.y);
+    orientPlaneToCamera(transitGroups[child.id], familyLayout.childScale, flipX, parent.rotation.y);
+  });
 }
 function gatesFor(person) {
   if (person === 'daniel') return parseGateList('#danielGates');
@@ -767,7 +796,7 @@ function chartPointInFamily(point, person, localDepth = 0) {
   const childIndex = familyChildren.findIndex(child => child.id === person);
   const isChild = childIndex >= 0;
   const scale = isChild ? familyLayout.childScale : familyLayout.parentScale;
-  let centerX = 0, centerY = 0, centerZ = 0, childRotation = 0;
+  let centerX = 0, centerY = 0, centerZ = 0;
   if (isChild) {
     const side = childIndex % 2 === 0 ? 1 : -1;
     const childOrdinal = Math.floor(childIndex / 2);
@@ -776,7 +805,6 @@ function chartPointInFamily(point, person, localDepth = 0) {
     const childAngle = side > 0 ? offset : Math.PI - offset;
     centerX = childPlaneRadius() * Math.cos(childAngle);
     centerZ = childPlaneRadius() * Math.sin(childAngle);
-    childRotation = Math.atan2(-centerX, -centerZ);
   } else {
     centerZ = person === frontPerson ? familyLayout.parentRadius : -familyLayout.parentRadius;
   }
@@ -784,17 +812,11 @@ function chartPointInFamily(point, person, localDepth = 0) {
   const localX = flipX ? 194.4 * scale - point.x * scale : point.x * scale - 194.4 * scale;
   const localY = -point.y * scale + chartViewHeight * scale + centerY;
   const localZ = localDepth * scale;
-  if (isChild || childRotation) {
-    return new THREE.Vector3(
-      centerX + Math.cos(childRotation) * localX + Math.sin(childRotation) * localZ,
-      localY,
-      centerZ - Math.sin(childRotation) * localX + Math.cos(childRotation) * localZ
-    );
-  }
+  const facingYaw = cameraAzimuth() - familyAzimuth;
   return new THREE.Vector3(
-    localX + centerX,
+    centerX + Math.cos(facingYaw) * localX + Math.sin(facingYaw) * localZ,
     localY,
-    (planeGroups[person]?.position.z || 0) + localZ
+    centerZ - Math.sin(facingYaw) * localX + Math.cos(facingYaw) * localZ
   );
 }
 function overlappingChartPairs() {
@@ -824,8 +846,13 @@ function refreshRelationshipPairing() {
   if (!currentChartData || !currentNatalGates) return;
   const pairs = overlappingChartPairs();
   const key = pairs.map(pair => pair.join(':')).sort().join('|');
-  if (key === activeRelationshipPairKey) return;
+  const facingAngle = cameraAzimuth() - familyAzimuth;
+  const facingDelta = lastRelationshipFacingAngle === null ? Infinity :
+    Math.abs(THREE.MathUtils.euclideanModulo(facingAngle - lastRelationshipFacingAngle + Math.PI, Math.PI * 2) - Math.PI);
+  const pairChanged = key !== activeRelationshipPairKey;
+  if (!pairChanged && facingDelta < THREE.MathUtils.degToRad(0.5)) return;
   activeRelationshipPairKey = key;
+  lastRelationshipFacingAngle = facingAngle;
   releaseGroup(relationshipGroup);
   for (let i = flowAnimations.length - 1; i >= 0; i--) {
     if (!flowAnimations[i].bead.parent) flowAnimations.splice(i, 1);
@@ -833,9 +860,11 @@ function refreshRelationshipPairing() {
   relationshipGroup = makeRelationshipGroup(currentChartData, currentNatalGates, currentTransitSnapshot, pairs);
   chartRoot.add(relationshipGroup);
   relationshipGroup.visible = document.querySelector('#showBridges').checked;
-  const names = pairs.map(pair => pair.map(person => window.hdChartNames?.[person] || (person === 'daniel' ? 'Person 1' : person === 'camille' ? 'Person 2' : 'Child')).join('–'));
-  setStatus(`${relationshipGroup.userData.bridgeCount} relationship channel bridge${relationshipGroup.userData.bridgeCount === 1 ? '' : 's'} between overlapping charts${names.length ? ` (${names.join(', ')})` : ''}.`);
-  frontFamilyReading();
+  if (pairChanged) {
+    const names = pairs.map(pair => pair.map(person => window.hdChartNames?.[person] || (person === 'daniel' ? 'Person 1' : person === 'camille' ? 'Person 2' : 'Child')).join('–'));
+    setStatus(`${relationshipGroup.userData.bridgeCount} relationship channel bridge${relationshipGroup.userData.bridgeCount === 1 ? '' : 's'} between overlapping charts${names.length ? ` (${names.join(', ')})` : ''}.`);
+    frontFamilyReading();
+  }
 }
 function relationshipLinkSpecs(a, b, personA, personB, natalGates, transitGates) {
   const gatesA = natalGates[personA] || new Set();
@@ -1136,6 +1165,7 @@ function rebuildRelationship() {
   relationshipGroup.visible = document.querySelector('#showBridges').checked;
   planeGroups.daniel.visible = document.querySelector('#showDaniel').checked;
   planeGroups.camille.visible = document.querySelector('#showCamille').checked;
+  syncChartFacing();
   frontFamilyReading();
   const pairNames = overlapPairs.map(pair => pair.map(person => window.hdChartNames?.[person] || (person === 'daniel' ? 'Person 1' : person === 'camille' ? 'Person 2' : 'Child')).join('–'));
   setStatus(`${relationshipGroup.userData.bridgeCount} relationship channel bridge${relationshipGroup.userData.bridgeCount === 1 ? '' : 's'} between overlapping charts${pairNames.length ? ` (${pairNames.join(', ')})` : ''}.`);
@@ -1206,6 +1236,7 @@ function orient(mode) {
   controls.target.set(0, familyViewCenterY, 0);
   lockOrbitElevation();
   controls.update();
+  syncChartFacing();
   refreshRelationshipPairing();
 }
 
@@ -1425,6 +1456,7 @@ function animate() {
     refreshFrontFamilyReading();
   }
   controls.update();
+  syncChartFacing();
   refreshRelationshipPairing();
   const cameraOffset = camera.position.clone().sub(controls.target);
   const cameraAzimuth = Math.atan2(cameraOffset.x, cameraOffset.z);
