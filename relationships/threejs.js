@@ -38,6 +38,12 @@ const planeGroups = {};
 let relationshipGroup = null;
 let transitGroup = null;
 let transitSnapshot = null;
+const transitToggle = document.querySelector('#showTransits');
+try {
+  transitToggle.checked = localStorage.getItem('castalia-hd-show-transits') !== 'false';
+} catch {
+  transitToggle.checked = true;
+}
 let sourceDocument = null;
 let loader = null;
 const gateDescriptions = new Map();
@@ -720,7 +726,11 @@ for (const selector of ['#danielGates', '#camilleGates']) document.querySelector
 document.querySelector('#showBridges').addEventListener('change', e => { if (relationshipGroup) relationshipGroup.visible = e.target.checked; });
 document.querySelector('#showDaniel').addEventListener('change', e => { if (planeGroups.daniel) planeGroups.daniel.visible = e.target.checked; });
 document.querySelector('#showCamille').addEventListener('change', e => { if (planeGroups.camille) planeGroups.camille.visible = e.target.checked; });
-document.querySelector('#showTransits').addEventListener('change', e => { if (transitGroup) transitGroup.visible = e.target.checked; });
+transitToggle.addEventListener('change', e => {
+  if (transitGroup) transitGroup.visible = e.target.checked;
+  try { localStorage.setItem('castalia-hd-show-transits', String(e.target.checked)); }
+  catch (error) { console.warn('Could not save transit visibility:', error); }
+});
 document.querySelector('#front').addEventListener('click', () => orient('front'));
 document.querySelector('#edge').addEventListener('click', () => orient('edge'));
 document.querySelector('#reset').addEventListener('click', () => orient('reset'));
