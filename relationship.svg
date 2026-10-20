@@ -34,7 +34,6 @@
 .center-shape{filter:none}.channel-group{pointer-events:none}.gate{pointer-events:none}
 </style>
   <g id="d-bodygraph-art" transform="translate(-22 0) scale(1.08 1)" class="person--daniel">
-    <ellipse class="halo" cx="180" cy="189" rx="112" ry="170" />
     <g id="d-channels">
       <g id="d-channel-64-47" class="channel-group" data-channel="64-47" data-from="64" data-to="47" data-circuit="logic" data-defined="false">
         <path class="channel" d="M169.00,47.93 C168.67,55.35 168.33,62.77 168.00,70.18" />
@@ -442,7 +441,6 @@
     </g>
   </g>
   <g id="c-bodygraph-art" transform="translate(22 0) scale(1.08 1)" class="person--camille">
-    <ellipse class="halo" cx="180" cy="189" rx="112" ry="170" />
     <g id="c-channels">
       <g id="c-channel-64-47" class="channel-group" data-channel="64-47" data-from="64" data-to="47" data-circuit="logic" data-defined="false">
         <path class="channel" d="M169.00,47.93 C168.67,55.35 168.33,62.77 168.00,70.18" />
