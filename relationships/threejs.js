@@ -1245,17 +1245,19 @@ function resize() {
   renderer.setSize(rect.width, rect.height, false);
   const aspect = rect.width / rect.height;
   const furthestChild = childPlaneRadius();
-  const chartHalfWidth = 194.4 * familyLayout.parentScale;
-  // Fit the complete circular footprint (outer center plus half a chart),
-  // then compensate for the camera zoom so the wider family remains visible.
-  const framingZoom = 1.0;
-  const halfWidth = (furthestChild + chartHalfWidth + 10) * framingZoom;
-  const halfHeight = Math.max((chartViewHeight * familyLayout.parentScale / 2 + 12) * framingZoom, halfWidth / aspect);
+  const chartWidth = 388.8 * familyLayout.parentScale;
+  const chartHeight = chartViewHeight * familyLayout.parentScale;
+  // Keep each graph near one fifth of the viewport width, while fitting the
+  // complete family footprint and chart height at every aspect ratio.
+  const desiredHalfWidth = chartWidth / 0.4;
+  const familyHalfWidth = furthestChild + chartWidth / 2 + 8;
+  const halfWidth = Math.max(desiredHalfWidth, familyHalfWidth);
+  const halfHeight = Math.max(chartHeight / 2 + 8, halfWidth / aspect);
   camera.left = -halfWidth;
   camera.right = halfWidth;
   camera.top = halfHeight;
   camera.bottom = -halfHeight;
-  camera.zoom = 1.42;
+  camera.zoom = 1;
   camera.updateProjectionMatrix();
 }
 function setSeparation(value) {
@@ -1276,7 +1278,7 @@ function orient(mode) {
   controls.minPolarAngle = 0;
   controls.maxPolarAngle = Math.PI;
   controls.reset();
-  camera.zoom = 1.42;
+  camera.zoom = 1;
   camera.updateProjectionMatrix();
   if (mode === 'edge') camera.position.set(800, familyViewCenterY, 0.01);
   else camera.position.set(0, familyViewCenterY, 820);
