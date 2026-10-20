@@ -124,19 +124,20 @@ async function longitude(epoch, body = 'sun') {
   if (!Number.isInteger(index) || index < 0 || index >= values?.length) throw new Error(`Ephemeris sample missing for ${body}.`);
   return ((Number(values[index]) % 360) + 360) % 360;
 }
-function gateAt(longitude) {
+function gatePositionAt(longitude) {
   const gateStep = 360 / 64;
   const adjusted = ((longitude - 358.25) % 360 + 360) % 360;
-  return GATE_ORDER[Math.min(63, Math.floor(adjusted / gateStep))];
+  const position = adjusted / gateStep;
+  const index = Math.min(63, Math.floor(position));
+  return { gate: GATE_ORDER[index], line: Math.min(6, Math.floor((position - index) * 6) + 1) };
 }
 async function chartActivationsAt(epoch, type) {
   const activations = [];
-  for (const planet of BODY_KEYS) activations.push({
-    planet: planet === 'true_node' ? 'north_node' : planet,
-    gate: gateAt(await longitude(epoch, planet)),
-    type
-  });
-  activations.push({ planet: 'south_node', gate: gateAt((await longitude(epoch, 'true_node') + 180) % 360), type });
+  for (const planet of BODY_KEYS) {
+    const position = gatePositionAt(await longitude(epoch, planet));
+    activations.push({ planet: planet === 'true_node' ? 'north_node' : planet, ...position, type });
+  }
+  activations.push({ planet: 'south_node', ...gatePositionAt((await longitude(epoch, 'true_node') + 180) % 360), type });
   return activations;
 }
 async function activeChart(profile) {
