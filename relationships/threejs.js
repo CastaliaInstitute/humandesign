@@ -34,6 +34,13 @@ lockOrbitElevation();
 
 const chartRoot = new THREE.Group();
 scene.add(chartRoot);
+// Rotate the whole family layout around its shared center. Keeping the camera
+// fixed preserves the exact-overlap front view as the starting orientation.
+let familyAzimuth = 0;
+function rotateFamily(step) {
+  familyAzimuth += step;
+  chartRoot.rotation.y = familyAzimuth;
+}
 const planeGroups = {};
 let relationshipGroup = null;
 const transitGroups = {};
@@ -1220,9 +1227,7 @@ window.addEventListener('keydown', event => {
   if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
   event.preventDefault();
   const step = (event.shiftKey ? 0.28 : 0.1) * (event.key === 'ArrowLeft' ? 1 : -1);
-  const offset = camera.position.clone().sub(controls.target).applyAxisAngle(new THREE.Vector3(0, 1, 0), step);
-  camera.position.copy(controls.target).add(offset);
-  controls.update();
+  rotateFamily(step);
 });
 window.addEventListener('resize', resize);
 function animate() {
