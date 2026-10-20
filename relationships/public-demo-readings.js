@@ -33,17 +33,17 @@ function pairKey(pair) {
 export function generatePublicDemoReading(view) {
   const front = view?.frontPerson;
   if (!front || !individualReadings[front.id] || !matchesPublicChart(front)) return null;
-  if ((view.overlappingPairs || []).some(pair => !(pair.charts || []).every(matchesPublicChart))) return null;
+  const relationships = view.relationships || view.overlappingPairs || [];
+  if (relationships.some(pair => !(pair.charts || []).every(matchesPublicChart))) return null;
   const paragraphs = [individualReadings[front.id]];
-  const pairs = view.overlappingPairs || [];
-  if (pairs.length) {
-    for (const pair of pairs) {
+  if (relationships.length) {
+    for (const pair of relationships) {
       const reading = relationshipReadings[pairKey(pair)];
       if (reading) paragraphs.push(reading);
       else paragraphs.push(`${pair.people?.join(' and ') || 'These family members'} are together in this view. Notice what feels familiar between them and where they may have different timing or ways of communicating. The chart details below offer one lens; simple check-ins and direct conversation are more useful than assuming what someone else is feeling.`);
     }
   } else {
-    paragraphs.push('This view focuses on the person in front. Rotate the family to bring two charts together for a reading of how their styles may meet.');
+    paragraphs.push('Relationship details are not available for the other family charts in this view.');
   }
   if (view.transitsShown) {
     const changes = front.transitChannelChanges || [];

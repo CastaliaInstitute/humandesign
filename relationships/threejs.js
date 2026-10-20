@@ -384,7 +384,7 @@ function frontFamilyReading() {
   if (!summary) return;
 
   const allCenterIds = Object.keys(centerDescriptions);
-  const visiblePairs = overlappingChartPairs();
+  const relationshipPairs = peers.map(peer => [readingPerson, peer]);
   const chartFacts = person => {
     const chartGates = gates.get(person) || gatesFor(person);
     const chartSummary = summarizeChart(chartGates, activations(person));
@@ -420,19 +420,12 @@ function frontFamilyReading() {
   };
   const viewContext = {
     frontPerson: chartFacts(readingPerson),
-    overlappingPairs: visiblePairs.map(([a, b]) => ({ ids: [a, b], people: [personName(a), personName(b)], charts: [chartFacts(a), chartFacts(b)] })),
+    relationships: relationshipPairs.map(([a, b]) => ({ ids: [a, b], people: [personName(a), personName(b)], charts: [chartFacts(a), chartFacts(b)] })),
     transitsShown: Boolean(transitToggle.checked),
     transitAsOf: transitSnapshot ? new Date(transitSnapshot.epoch * 1000).toLocaleString() : null
   };
   readingViewKey = JSON.stringify(viewContext);
   window.hdCurrentReadingView = viewContext;
-  const alignment = document.createElement('p');
-  if (visiblePairs.length) {
-    appendReadingText(alignment, `This view brings ${visiblePairs.map(pair => pair.map(personName).join(' and ')).join('; ')} into alignment. The reading below focuses on how their defined and open centers meet.`);
-  } else {
-    alignment.textContent = 'No chart centers overlap in this view, so no pairwise energy exchange is shown. Rotate the family to bring two charts together.';
-  }
-  root.append(alignment);
 
   const describeCenters = (centers, withThemes = false) => centers.map(center => {
     const [name, theme] = centerDescriptions[center] || [center, ''];
@@ -485,7 +478,7 @@ function frontFamilyReading() {
     root.append(transitSection);
   }
 
-  for (const [personA, personB] of visiblePairs) {
+  for (const [personA, personB] of relationshipPairs) {
     const gatesA = gates.get(personA) || gatesFor(personA), gatesB = gates.get(personB) || gatesFor(personB);
     const nameA = personName(personA), nameB = personName(personB);
     const summaryA = summarizeChart(gatesA, activations(personA));
@@ -505,7 +498,7 @@ function frontFamilyReading() {
     const newlyDefinedTogether = allCenterIds.filter(center => combinedCenters.has(center) && !centersA.has(center) && !centersB.has(center));
     const openInConnection = allCenterIds.filter(center => !combinedCenters.has(center));
     const definedInConnection = allCenterIds.filter(center => combinedCenters.has(center));
-    facts.push(`Together, their relationship chart defines ${describeCenters(definedInConnection).join(', ') || 'no centers'}; ${openInConnection.length ? `${describeCenters(openInConnection).join(', ')} remain undefined (open)` : 'no centers remain undefined'}`);
+    facts.push(`Together, their connection defines ${describeCenters(definedInConnection).join(', ') || 'no centers'}; ${openInConnection.length ? `${describeCenters(openInConnection).join(', ')} remain undefined (open)` : 'no centers remain undefined'}`);
     if (bothDefined.length) {
       facts.push(`Both charts define ${describeCenters(bothDefined).join(', ')}, so ${describeCenters(bothDefined).join(' and ')} are relatively consistent themes for each person and may feel mutually reinforcing`);
     }
@@ -562,14 +555,9 @@ function frontFamilyReading() {
     }
     const item = document.createElement('p');
     const itemText = facts.length
-      ? `${nameA} and ${nameB} overlap in this view. ${facts.join('. ')}.`
-      : `${nameA} and ${nameB} overlap in this view, but no shared gates or joint channel completions are present.`;
+      ? `${nameA} and ${nameB}'s relationship: ${facts.join('. ')}.`
+      : `${nameA} and ${nameB}'s relationship has no shared gates or complementary channel completions in their natal charts.`;
     appendReadingText(item, itemText);
-    root.append(item);
-  }
-  if (!visiblePairs.length) {
-    const item = document.createElement('p');
-    item.textContent = `As the family turns, no two chart centers currently line up in this view. Rotate the scene to see each overlapping pair and its relationship channels.`;
     root.append(item);
   }
   const note = document.createElement('small');
