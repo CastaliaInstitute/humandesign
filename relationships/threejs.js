@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import '../transit-data.js?family-circle-108-20261019';
+import { generatePublicDemoReading } from './public-demo-readings.js?v=public-demo-ai-readings-20261019';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { SVGLoader } from 'three/addons/loaders/SVGLoader.js';
 
@@ -80,6 +81,8 @@ let rebuildTimer = null;
 let exactFrontAlignment = true;
 let frontPerson = 'daniel';
 let readingFrontPerson = null;
+let readingViewKey = '';
+const generatedReadings = new Map();
 const flowAnimations = [];
 const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 let autoRotate = !reduceMotion;
@@ -197,6 +200,24 @@ function appendInteractiveReadingText(element, text, people, personName) {
     cursor = match.end;
   }
   appendPlain(text.slice(cursor));
+}
+function renderAiReading(text, people, personName) {
+  const root = document.querySelector('#familyReadingBody');
+  if (!root) return;
+  root.querySelector('.ai-reading')?.remove();
+  const section = document.createElement('section');
+  section.className = 'ai-reading';
+  section.setAttribute('aria-label', 'AI-generated chart interpretation');
+  const label = document.createElement('small');
+  label.className = 'ai-reading-label';
+  label.textContent = 'AI reading';
+  section.append(label);
+  for (const paragraph of String(text).split(/\n\s*\n/).map(value => value.trim()).filter(Boolean)) {
+    const item = document.createElement('p');
+    appendInteractiveReadingText(item, paragraph, people, personName);
+    section.append(item);
+  }
+  root.prepend(section);
 }
 function cameraAzimuth() {
   const offset = camera.position.clone().sub(controls.target);
@@ -351,7 +372,49 @@ function frontFamilyReading() {
   if (heading) heading.textContent = frontName;
   if (!summary) return;
 
+  const allCenterIds = Object.keys(centerDescriptions);
   const visiblePairs = overlappingChartPairs();
+  const chartFacts = person => {
+    const chartGates = gates.get(person) || gatesFor(person);
+    const chartSummary = summarizeChart(chartGates, activations(person));
+    const allTransitGates = new Set(transitSnapshot?.gates || []);
+    const chartTransits = [...allTransitGates].filter(gate => !chartGates.has(gate));
+    const transitChannelChanges = transitToggle.checked && transitSnapshot
+      ? [...sourceDocument.querySelectorAll('.person--daniel .channel-group[data-from][data-to]')].flatMap(node => {
+        const from = +node.dataset.from, to = +node.dataset.to;
+        const id = `${Math.min(from, to)}-${Math.max(from, to)}`;
+        const transitGates = [from, to].filter(gate => allTransitGates.has(gate) && !chartGates.has(gate));
+        if (!transitGates.length || !(chartGates.has(from) || allTransitGates.has(from)) || !(chartGates.has(to) || allTransitGates.has(to)) || (chartGates.has(from) && chartGates.has(to))) return [];
+        return [{
+          channel: `${Math.min(from, to)}–${Math.max(from, to)}`,
+          channelName: relationshipChannelReadings[id]?.name || channelDescriptions.get(id)?.name || '',
+          transitGates: transitGates.map(gate => ({ gate, planets: transitPlanetNames(gate), expectedThrough: transitGateWindow(gate) }))
+        }];
+      })
+      : [];
+    return {
+      id: person,
+      name: personName(person),
+      type: chartSummary?.type,
+      profile: chartSummary?.profile,
+      authority: chartSummary?.authority,
+      strategy: chartSummary?.strategy,
+      natalGates: [...chartGates].sort((a, b) => a - b),
+      definedCenters: chartSummary?.definedCenters || [],
+      openCenters: allCenterIds.filter(center => !(chartSummary?.definedCenters || []).includes(center)),
+      natalChannels: chartSummary?.definedChannels || [],
+      transitChannelChanges,
+      transitGates: chartTransits.map(gate => ({ gate, planets: transitPlanetNames(gate), expectedThrough: transitGateWindow(gate) }))
+    };
+  };
+  const viewContext = {
+    frontPerson: chartFacts(readingPerson),
+    overlappingPairs: visiblePairs.map(([a, b]) => ({ ids: [a, b], people: [personName(a), personName(b)], charts: [chartFacts(a), chartFacts(b)] })),
+    transitsShown: Boolean(transitToggle.checked),
+    transitAsOf: transitSnapshot ? new Date(transitSnapshot.epoch * 1000).toLocaleString() : null
+  };
+  readingViewKey = JSON.stringify(viewContext);
+  window.hdCurrentReadingView = viewContext;
   const alignment = document.createElement('p');
   if (visiblePairs.length) {
     appendReadingText(alignment, `This view brings ${visiblePairs.map(pair => pair.map(personName).join(' and ')).join('; ')} into alignment. The reading below focuses on how their defined and open centers meet.`);
@@ -360,7 +423,6 @@ function frontFamilyReading() {
   }
   root.append(alignment);
 
-  const allCenterIds = Object.keys(centerDescriptions);
   const describeCenters = (centers, withThemes = false) => centers.map(center => {
     const [name, theme] = centerDescriptions[center] || [center, ''];
     const centerTheme = theme.replace(/[.!?]+$/, '').toLowerCase();
@@ -379,7 +441,6 @@ function frontFamilyReading() {
 
   const natalFrontGates = gates.get(readingPerson);
   const transitGates = new Set(transitSnapshot?.gates || []);
-  const transitOnlyGates = [...transitGates].filter(gate => !natalFrontGates.has(gate));
   const transitChannels = [];
   const channels = [...sourceDocument.querySelectorAll('.person--daniel .channel-group[data-from][data-to]')].map(channel => {
     const from = +channel.dataset.from, to = +channel.dataset.to;
@@ -398,17 +459,16 @@ function frontFamilyReading() {
     }
     const transitSection = document.createElement('p');
     const asOf = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(transitSnapshot.epoch * 1000));
-    if (!transitOnlyGates.length && !transitChannels.length) {
-      transitSection.textContent = `At ${asOf}, the current transits add no new gates or channels to ${frontName}'s chart.`;
+    if (!transitChannels.length) {
+      transitSection.textContent = `At ${asOf}, the current transits do not complete a new channel in ${frontName}'s chart, so there is no temporary channel change to highlight.`;
     } else {
-      const gateDetails = transitOnlyGates.map(gate => `Gate ${gate}, activated by ${transitPlanetNames(gate)}, is ${transitGateWindow(gate)}`);
       const channelDetails = transitChannels.map(channel => {
         const names = channel.reading?.name ? ` · ${channel.reading.name}` : '';
         const bounds = channel.temporaryGates.map(gate => `gate ${gate} ${transitGateWindow(gate)}`).join(' and ');
-        return `the ${channel.label}${names} channel is temporarily complete while ${bounds}`;
+        return `the ${channel.label}${names} channel is temporarily complete while ${bounds}; after the contributing transit gate moves on, it will no longer be completed by the transit`;
       });
       const centers = temporaryCenters.length ? ` Together, these activations temporarily define ${temporaryCenters.map(center => centerDescriptions[center]?.[0] || center).join(', ')}.` : '';
-      transitSection.textContent = `At ${asOf}, ${[...gateDetails, ...channelDetails].join('; ')}.${centers}`;
+      transitSection.textContent = `At ${asOf}, current transits temporarily complete ${channelDetails.join('; ')}.${centers}`;
     }
     appendReadingText(transitSection, transitSection.textContent);
     root.append(transitSection);
@@ -484,7 +544,7 @@ function frontFamilyReading() {
         const connectionText = temporaryConnections.map(({ channel, temporaryGates }) => {
           const title = channel.reading?.name ? ` (${channel.reading.name})` : '';
           const gatesText = temporaryGates.map(gate => `Gate ${gate}, activated by ${transitPlanetNames(gate)}, ${transitGateWindow(gate)}`).join(' and ');
-          return `the ${channel.label}${title} channel while ${gatesText}`;
+          return `the ${channel.label}${title} channel for now, while ${gatesText}; it will no longer be completed by the transit after its contributing gate moves on`;
         });
         facts.push(`Current transits temporarily complete ${connectionText.join('; ')}`);
       }
@@ -504,7 +564,50 @@ function frontFamilyReading() {
   const note = document.createElement('small');
   note.textContent = 'These are Human Design prompts for reflection, not fixed claims about anyone or a compatibility verdict. Transit windows are estimates and can shift.';
   root.append(note);
+  const cached = generatedReadings.get(readingViewKey);
+  if (cached) renderAiReading(cached, familyPeople, personName);
+  else if (window.hdUsingPublicExample) {
+    const publicReading = generatePublicDemoReading(viewContext);
+    if (publicReading) {
+      generatedReadings.set(readingViewKey, publicReading);
+      renderAiReading(publicReading, familyPeople, personName);
+    }
+  }
 }
+document.querySelector('#generateFamilyReading')?.addEventListener('click', async event => {
+  const button = event.currentTarget;
+  const root = document.querySelector('#familyReadingBody');
+  if (!window.hdCurrentReadingView || !window.CastaliaHumanDesignAIReading?.generate) {
+    button.textContent = 'Chart loading…';
+    return;
+  }
+  const requestedKey = readingViewKey;
+  const people = ['daniel', 'camille', ...familyChildren.map(child => child.id)];
+  const personName = person => window.hdChartNames?.[person] || (person === 'daniel' ? 'Person 1' : person === 'camille' ? 'Person 2' : 'Child');
+  button.disabled = true;
+  button.textContent = 'Reading…';
+  let status = root.querySelector('.ai-reading-status');
+  if (!status) {
+    status = document.createElement('p');
+    status.className = 'ai-reading-status';
+    root.append(status);
+  }
+  status.textContent = 'Generating a grounded reading for this view…';
+  try {
+    const answer = await window.CastaliaHumanDesignAIReading.generate(window.hdCurrentReadingView);
+    generatedReadings.set(requestedKey, answer);
+    if (readingViewKey === requestedKey) {
+      status.remove();
+      renderAiReading(answer, people, personName);
+    }
+    button.textContent = '✦ Refresh AI reading';
+  } catch (error) {
+    if (readingViewKey === requestedKey) status.textContent = error.message || 'Could not generate the reading. Try again.';
+    button.textContent = '✦ Try AI reading again';
+  } finally {
+    button.disabled = false;
+  }
+});
 controls.addEventListener('change', refreshFrontFamilyReading);
 const pale = new THREE.Color('#fffcf5');
 const gray = new THREE.Color('#96928a');
@@ -799,11 +902,11 @@ function makePlaneGroup(paths, person, sharedChannels, relationshipChannels, opt
       const roadColor = color;
       // In exact front view, separate shared tracks by a few pixels so both
       // contributors remain visibly blue and pink instead of blending purple.
-      const opacity = active ? (exactFrontAlignment ? 0.46 : 0.78) : 0.17;
+      const opacity = active ? (exactFrontAlignment ? 0.46 : 0.78) : 0.10;
       const sharedOffset = exactFrontAlignment && active && sharedChannels.has(channelId) ? (person === 'daniel' ? -2.2 : 2.2) : 0;
       // Each SVG rail becomes a two-lane carriageway; the divider and dashed lane marks make the road legible in depth.
       const roadMat = lineMaterial(roadColor, opacity);
-      const laneMat = lineMaterial(pale, active ? (exactFrontAlignment ? 0.22 : 0.7) : 0.13);
+      const laneMat = lineMaterial(pale, active ? (exactFrontAlignment ? 0.22 : 0.7) : 0.08);
       for (const subPath of path.subPaths) {
         const rawPoints = subPath.getPoints(16);
         const points = sharedOffset ? offsetPathPoints(rawPoints, sharedOffset) : rawPoints;

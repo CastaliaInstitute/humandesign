@@ -1,3 +1,5 @@
+import { generatePublicDemoReading } from './public-demo-readings.js';
+
 const config = window.castaliaConfig || {};
 const launcher = document.querySelector('#chartChatLauncher');
 const panel = document.querySelector('#chartChat');
@@ -14,7 +16,7 @@ let signedIn = false;
 let firstReadingStarted = false;
 let channelDefinitions;
 
-const readingInstruction = `You are the Castalia Astrolabe Human Design chart reader. Interpret the supplied natal gates and current Human Design transit activations in clear, grounded language. Focus on what the current transits temporarily add to each chart, which channels and relationship bridges they complete, and how long each active planetary gate is expected to remain active. Use the supplied BodyGraph channel guide when discussing a channel. The supplied ephemeris and next-gate-exit estimates are the factual source of truth. State the local date/time and remaining duration for each planet when available; call these estimates based on 15-minute ephemeris samples, not guarantees. If no exit is available within the supplied window, say the duration is unknown. Separate natal activations from temporary transits. Explain Human Design as a reflective framework, never as a scientific finding or prediction of events. Do not invent chart facts, transit dates, certainty, or personality traits. Answer the user's question directly and use a compact, readable format.`;
+const readingInstruction = `You are the Castalia Astrolabe Human Design chart reader. Interpret supplied natal gates and current Human Design transits in clear, grounded language. When discussing transits, prioritize channels that are temporarily completed or bridged in a chart or relationship, and explain that the channel will no longer be completed by that transit when its contributing gate moves on. Give the channel's estimated active window using the supplied next-gate-exit estimates. Mention an individual gate only when it helps explain a channel completion; do not list transit gates that create no channel change. Use the supplied BodyGraph channel guide. The supplied ephemeris and exit estimates are factual sources of truth, based on 15-minute samples and not guarantees. If no exit is available in the window, say the end time is unknown. Separate natal activations from temporary transits. When reading multiple charts, weave defined and undefined centers into a relational interpretation: describe consistent patterns, sensitivity to context, shared definition, and what complementary channels add. Avoid reducing people to a checklist. Explain Human Design as a reflective framework, never as a scientific finding, diagnosis, or prediction. Do not invent chart facts, transit dates, certainty, or personality traits. Answer directly in specific, warm, readable prose.`;
 
 function addMessage(role, text, extraClass = '') {
   const node = document.createElement('div');
@@ -86,7 +88,32 @@ function activeChannels(definitions, natalGates, transitGates) {
     }));
 }
 
-function bridgesBetween(definitions, first, second, transitGates) {
+function transitChannelChanges(definitions, natalGates, snapshot, durationByPlanet) {
+  const transitGates = new Set(snapshot.gates);
+  return definitions.filter(({ from, to }) => {
+    const transitContributed = (transitGates.has(from) && !natalGates.has(from)) || (transitGates.has(to) && !natalGates.has(to));
+    return transitContributed && new Set([...natalGates, ...transitGates]).has(from) && new Set([...natalGates, ...transitGates]).has(to) && !(natalGates.has(from) && natalGates.has(to));
+  }).map(({ id, from, to, reading }) => {
+    const transitEndpoints = [from, to].filter(gate => transitGates.has(gate) && !natalGates.has(gate));
+    const planets = [...new Set(transitEndpoints.flatMap(gate => snapshot.gatePlanets[gate] || []))];
+    const exits = planets.map(planet => durationByPlanet[planet]?.nextGateExit).filter(Boolean).map(value => new Date(value).getTime());
+    const endsAt = exits.length ? Math.min(...exits) : null;
+    const remainingMs = endsAt === null ? null : Math.max(0, endsAt - snapshot.epoch * 1000);
+    const hours = remainingMs === null ? null : Math.floor(remainingMs / 3600000);
+    return {
+      channel: id,
+      gates: `${from}–${to}`,
+      chartGuide: reading,
+      natalGates: [from, to].filter(gate => natalGates.has(gate)),
+      transitGates: transitEndpoints.map(gate => ({ gate, planets: snapshot.gatePlanets[gate] || [] })),
+      expectedToStopCompletingAt: endsAt === null ? null : new Date(endsAt).toISOString(),
+      expectedToStopCompletingAtLocal: endsAt === null ? null : new Date(endsAt).toLocaleString(),
+      estimatedRemaining: hours === null ? 'end estimate unavailable' : hours >= 24 ? `about ${Math.floor(hours / 24)}d ${hours % 24}h` : `about ${Math.max(1, hours)}h`
+    };
+  });
+}
+
+function bridgesBetween(definitions, first, second, transitGates, snapshot, durationByPlanet) {
   const firstActive = new Set([...first.natalGates, ...transitGates]);
   const secondActive = new Set([...second.natalGates, ...transitGates]);
   const gateContributors = gate => [
@@ -98,12 +125,25 @@ function bridgesBetween(definitions, first, second, transitGates) {
     if ((first.natalGates.has(from) && first.natalGates.has(to)) || (second.natalGates.has(from) && second.natalGates.has(to))) return false;
     return (firstActive.has(from) && secondActive.has(to) && (first.natalGates.has(from) || second.natalGates.has(to))) ||
       (secondActive.has(from) && firstActive.has(to) && (second.natalGates.has(from) || first.natalGates.has(to)));
-  }).map(({ id, from, to, reading }) => ({
-    channel: id,
-    gates: `${from}–${to}`,
-    chartGuide: reading,
-    contributions: [`Gate ${from}: ${gateContributors(from)}`, `Gate ${to}: ${gateContributors(to)}`]
-  }));
+  }).map(({ id, from, to, reading }) => {
+    const contributedGates = [from, to].filter(gate => transitGates.has(gate) && !first.natalGates.has(gate) && !second.natalGates.has(gate));
+    const planets = [...new Set(contributedGates.flatMap(gate => snapshot.gatePlanets[gate] || []))];
+    const exits = planets.map(planet => durationByPlanet[planet]?.nextGateExit).filter(Boolean).map(value => new Date(value).getTime());
+    const endsAt = exits.length ? Math.min(...exits) : null;
+    const remainingMs = endsAt === null ? null : Math.max(0, endsAt - snapshot.epoch * 1000);
+    const hours = remainingMs === null ? null : Math.floor(remainingMs / 3600000);
+    return {
+      channel: id,
+      gates: `${from}–${to}`,
+      chartGuide: reading,
+      contributions: [`Gate ${from}: ${gateContributors(from)}`, `Gate ${to}: ${gateContributors(to)}`],
+      transitContributed: contributedGates.length > 0,
+      transitGates: contributedGates.map(gate => ({ gate, planets: snapshot.gatePlanets[gate] || [] })),
+      expectedToStopCompletingAt: endsAt === null ? null : new Date(endsAt).toISOString(),
+      expectedToStopCompletingAtLocal: endsAt === null ? null : new Date(endsAt).toLocaleString(),
+      estimatedRemaining: hours === null ? 'end estimate unavailable' : hours >= 24 ? `about ${Math.floor(hours / 24)}d ${hours % 24}h` : `about ${Math.max(1, hours)}h`
+    };
+  });
 }
 
 function remainingLabel(snapshotEpoch, exitsAt) {
@@ -128,29 +168,32 @@ async function buildChartContext() {
   const camilleGates = parseGates('#camilleGates');
   if (!danielGates.size || !camilleGates.size) throw new Error('The selected charts are still being calculated. Wait a moment and try again.');
   const transitGates = new Set(snapshot.gates);
-  const children = (window.hdRelationshipChildren || []).map(child => {
-    const gates = new Set(child.gates || []);
-    return {
-      name: child.name || child.id || 'Child chart',
-      natalGates: [...gates].sort((a, b) => a - b),
-      currentlyActiveChannels: activeChannels(definitions, gates, transitGates)
-    };
-  });
   const durationByPlanet = Object.fromEntries(durations.map(item => [item.planet, {
     gate: item.gate,
     nextGateExit: item.exitsAt,
     remaining: remainingLabel(snapshot.epoch, item.exitsAt)
   }]));
+  const children = (window.hdRelationshipChildren || []).map(child => {
+    const gates = new Set(child.gates || []);
+    return {
+      name: child.name || child.id || 'Child chart',
+      natalGates: [...gates].sort((a, b) => a - b),
+      currentlyActiveChannels: activeChannels(definitions, gates, transitGates),
+      transitChannelChanges: transitChannelChanges(definitions, gates, snapshot, durationByPlanet)
+    };
+  });
   const charts = {
     blue: {
       name: window.hdChartNames?.daniel || document.querySelector('#chartNameA')?.textContent || 'Blue chart',
       natalGates: [...danielGates].sort((a, b) => a - b),
-      currentlyActiveChannels: activeChannels(definitions, danielGates, transitGates)
+      currentlyActiveChannels: activeChannels(definitions, danielGates, transitGates),
+      transitChannelChanges: transitChannelChanges(definitions, danielGates, snapshot, durationByPlanet)
     },
     pink: {
       name: window.hdChartNames?.camille || document.querySelector('#chartNameB')?.textContent || 'Pink chart',
       natalGates: [...camilleGates].sort((a, b) => a - b),
-      currentlyActiveChannels: activeChannels(definitions, camilleGates, transitGates)
+      currentlyActiveChannels: activeChannels(definitions, camilleGates, transitGates),
+      transitChannelChanges: transitChannelChanges(definitions, camilleGates, snapshot, durationByPlanet)
     }
   };
   const familyCharts = [
@@ -161,7 +204,7 @@ async function buildChartContext() {
   const familyConnections = [];
   for (let i = 0; i < familyCharts.length; i++) {
     for (let j = i + 1; j < familyCharts.length; j++) {
-      const bridges = bridgesBetween(definitions, familyCharts[i], familyCharts[j], transitGates);
+      const bridges = bridgesBetween(definitions, familyCharts[i], familyCharts[j], transitGates, snapshot, durationByPlanet);
       if (bridges.length) familyConnections.push({
         people: [familyCharts[i].name, familyCharts[j].name],
         channels: bridges
@@ -184,7 +227,7 @@ async function buildChartContext() {
     })),
     charts,
     children,
-    currentRelationshipBridges: bridgesBetween(definitions, familyCharts[0], familyCharts[1], transitGates),
+    currentRelationshipBridges: bridgesBetween(definitions, familyCharts[0], familyCharts[1], transitGates, snapshot, durationByPlanet),
     familyConnections
   };
 }
@@ -209,7 +252,7 @@ async function waitForNatalProfiles() {
 function composeUserMessage(question, context, firstReading) {
   const prior = conversation.slice(-8).map(turn => `${turn.role === 'user' ? 'User' : 'Reader'}: ${turn.text}`).join('\n');
   const prompt = firstReading
-    ? 'Give me a warm, specific reading of this example family BodyGraph. Start with the parent dynamic, then describe each child in relation to the family using the supplied family connections. Separate natal patterns from current transits. Highlight what transits add to the family charts and parent relationship bridges, and include estimated local exit times and remaining durations for active planetary gates where available. Keep it grounded in the supplied gates and channel guide; do not infer unsupported traits.'
+    ? 'Give me a warm, specific reading of this example family BodyGraph. Start with the parent dynamic, then describe each child in relation to the family using the supplied family connections. Separate natal patterns from current transits. Focus the transit portion on channels temporarily completed in each chart or relationship, and explain when they are expected to stop completing as their transit gates move on. Include estimated local time bounds where available. Mention a transit gate only to explain a channel change; do not list all active gates. Keep it grounded in the supplied gates and channel guide; do not infer unsupported traits.'
     : question;
   return [
     'Verified chart and current transit context (JSON facts):',
@@ -281,6 +324,49 @@ async function requestReading(question, firstReading = false) {
     questionBox.focus({ preventScroll: true });
   }
 }
+
+async function generateFrontViewReading(view) {
+  const publicExampleReading = !signedIn && window.hdUsingPublicExample;
+  if (!signedIn && !publicExampleReading) throw new Error('Sign in with Castalia to generate readings for your selected charts.');
+  if (publicExampleReading) {
+    const reading = generatePublicDemoReading(view);
+    if (reading) return reading;
+  }
+  if (!config.supabaseUrl || !config.supabaseAnonKey) throw new Error('Castalia AI reading is not configured on this deployment.');
+  const token = signedIn ? await window.CastaliaHumanDesignAuth?.getAccessToken() : config.supabaseAnonKey;
+  if (!token) throw new Error('Your Castalia session expired. Sign in again to continue.');
+  const context = await buildChartContext();
+  const userMessage = [
+    'Verified family chart, channel guide, and current transit context (JSON facts):',
+    JSON.stringify(context),
+    'Current camera view (JSON facts):',
+    JSON.stringify(view),
+    'Write a concise, fluent reading for this exact view. Begin with a specific individual interpretation of the front-facing chart that connects type, strategy, authority, profile, defined/undefined centers, and natal channels into a coherent picture. Then interpret only the overlapping pair(s): explain their energy exchange through centers, shared definition, and complementary channels. If no pair overlaps, keep the relationship section brief. End with a short transit note only when current transits affect the front chart or visible pair. Prioritize channels the transits temporarily complete and say when each is expected to stop completing as its gate moves on; include local time bounds. Mention a transit gate only to explain a channel change, and omit gates that create no channel change. Prefer practical reflection and specific evidence over generic praise or lists. Do not repeat every gate, center, or transit. Write 2–4 compact paragraphs, without tables or a compatibility verdict.'
+  ].join('\n\n');
+  const response = await fetch(`${String(config.supabaseUrl).replace(/\/+$/, '')}/functions/v1/voice-pipeline`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      apikey: config.supabaseAnonKey,
+      Authorization: `Bearer ${token}`
+    },
+    body: JSON.stringify({
+      message: userMessage,
+      face: 'astrology',
+      systemInstruction: readingInstruction,
+      generateTts: false,
+      commonplaceMode: 'off',
+      responseFormat: 'json'
+    })
+  });
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(result.error || `Castalia Astrolabe returned ${response.status}.`);
+  const answer = String(result.reply || '').trim();
+  if (!answer) throw new Error('The Astrolabe returned an empty reading. Please try again.');
+  return answer;
+}
+
+window.CastaliaHumanDesignAIReading = { generate: generateFrontViewReading };
 
 launcher.addEventListener('click', () => setOpen(panel.hidden));
 closeButton.addEventListener('click', () => setOpen(false));
