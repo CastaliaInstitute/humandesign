@@ -1441,7 +1441,7 @@ window.addEventListener('keydown', event => {
   if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
   pauseAutoRotate();
   event.preventDefault();
-  const step = (event.altKey ? Math.PI / 4 : event.shiftKey ? 0.28 : 0.1) * (event.key === 'ArrowLeft' ? 1 : -1);
+  const step = (event.shiftKey ? Math.PI / 4 : event.altKey ? 0.28 : 0.1) * (event.key === 'ArrowLeft' ? 1 : -1);
   rotateFamily(step);
 });
 window.addEventListener('resize', resize);
