@@ -286,7 +286,13 @@ let selectedProfiles = [
 ];
 fillBirthFields(selectedProfiles[0], 'A'); fillBirthFields(selectedProfiles[1], 'B');
 displayProfile(selectedProfiles[0], 'daniel'); displayProfile(selectedProfiles[1], 'camille');
-async function applyProfiles(signedInChart = false) {
+window.hdUsingPublicExample = false;
+window.hdExampleNatalProfilesReady = false;
+async function applyProfiles(signedInChart = false, publicExample = false) {
+  if (!publicExample) {
+    window.hdUsingPublicExample = false;
+    window.hdExampleNatalProfilesReady = false;
+  }
   const [baseA, baseB] = selectedProfiles;
   if (!baseA || !baseB) return;
   const a = profileFromBirthFields(baseA, 'A');
@@ -302,6 +308,11 @@ async function applyProfiles(signedInChart = false) {
     document.querySelector('#camilleGates').dispatchEvent(new Event('input', { bubbles: true }));
     displayProfile(a, 'daniel'); displayProfile(b, 'camille');
     status(`${names.daniel} and ${names.camille} charts calculated. Form edits are saved in this browser.`);
+    window.hdUsingPublicExample = Boolean(publicExample && !signedInChart);
+    if (window.hdUsingPublicExample) {
+      window.hdExampleNatalProfilesReady = true;
+      window.dispatchEvent(new Event('castalia-example-charts-ready'));
+    }
     if (signedInChart && signedInProfilesPending) {
       signedInProfilesPending = false;
       window.hdNatalProfilesReady = true;
@@ -316,7 +327,7 @@ async function applyProfiles(signedInChart = false) {
     }
   }
 }
-void applyProfiles();
+void applyProfiles(false, true);
 function installProfileOptions(profiles, login) {
   void publishChildren(profiles);
   const mine = profiles.findIndex(p => normalizedLogin(p.github) === normalizedLogin(login));
@@ -326,6 +337,7 @@ function installProfileOptions(profiles, login) {
   const second = camille >= 0 ? camille : profiles.findIndex((p, i) => i !== first && /partner|spouse/i.test(p.relationship || p.role || ''));
   personA.value = String(first); personB.value = String(second >= 0 ? second : Math.min(first + 1, profiles.length - 1));
   const update = () => {
+    window.hdUsingPublicExample = false;
     selectedProfiles = [profiles[Number(personA.value)], profiles[Number(personB.value)]];
     fillBirthFields(selectedProfiles[0], 'A'); fillBirthFields(selectedProfiles[1], 'B');
     const needsReview = selectedProfiles.some(p => !/exact|recorded|confirmed/i.test(p.birth_time_status || ''));
@@ -391,6 +403,7 @@ document.querySelector('#applyBirthDetails').addEventListener('click', () => {
 });
 async function handleSession(session) {
   if (!session?.user || !supabase) return;
+  window.hdUsingPublicExample = false;
   const login = session.user.user_metadata?.user_name || session.user.user_metadata?.preferred_username || session.user.user_metadata?.login;
   if (!login) { status('Castalia sign-in succeeded, but GitHub did not provide a username.'); return; }
   if (loadedUser === session.user.id) return;

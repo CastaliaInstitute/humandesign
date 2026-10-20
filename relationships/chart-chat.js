@@ -30,7 +30,7 @@ function setOpen(open) {
   launcher.setAttribute('aria-expanded', String(open));
   if (open) {
     updateAuthUI();
-    if (signedIn && !firstReadingStarted) void requestReading('', true);
+    if (!firstReadingStarted && (signedIn || window.hdUsingPublicExample)) void requestReading('', true);
     if (signedIn) questionBox.focus({ preventScroll: true });
   }
 }
@@ -46,7 +46,9 @@ function updateAuthUI() {
   loginButton.hidden = signedIn;
   loginText.textContent = signedIn
     ? ''
-    : 'Sign in with Castalia to get a reading and ask questions about the charts.';
+    : window.hdUsingPublicExample
+      ? 'Generate a reading for the public family example. Sign in with Castalia to ask follow-up questions.'
+      : 'Sign in with Castalia to get a reading and ask questions about the charts.';
 }
 
 function parseGates(selector) {
@@ -84,21 +86,23 @@ function activeChannels(definitions, natalGates, transitGates) {
     }));
 }
 
-function relationshipBridges(definitions, daniel, camille, transitGates) {
-  const danielActive = new Set([...daniel, ...transitGates]);
-  const camilleActive = new Set([...camille, ...transitGates]);
+function bridgesBetween(definitions, first, second, transitGates) {
+  const firstActive = new Set([...first.natalGates, ...transitGates]);
+  const secondActive = new Set([...second.natalGates, ...transitGates]);
+  const gateContributors = gate => [
+    ...(first.natalGates.has(gate) ? [`${first.name} natal`] : []),
+    ...(second.natalGates.has(gate) ? [`${second.name} natal`] : []),
+    ...(transitGates.has(gate) ? ['transit'] : [])
+  ].join(' + ') || 'no natal contribution';
   return definitions.filter(({ from, to }) => {
-    if ((daniel.has(from) && daniel.has(to)) || (camille.has(from) && camille.has(to))) return false;
-    return (danielActive.has(from) && camilleActive.has(to) && (daniel.has(from) || camille.has(to))) ||
-      (camilleActive.has(from) && danielActive.has(to) && (camille.has(from) || daniel.has(to)));
+    if ((first.natalGates.has(from) && first.natalGates.has(to)) || (second.natalGates.has(from) && second.natalGates.has(to))) return false;
+    return (firstActive.has(from) && secondActive.has(to) && (first.natalGates.has(from) || second.natalGates.has(to))) ||
+      (secondActive.has(from) && firstActive.has(to) && (second.natalGates.has(from) || first.natalGates.has(to)));
   }).map(({ id, from, to, reading }) => ({
     channel: id,
     gates: `${from}–${to}`,
     chartGuide: reading,
-    contributions: [
-      `Gate ${from}: ${daniel.has(from) ? 'blue chart natal' : ''}${daniel.has(from) && camille.has(from) ? ' + ' : ''}${camille.has(from) ? 'pink chart natal' : ''}${transitGates.has(from) ? `${daniel.has(from) || camille.has(from) ? ' + ' : ''}transit` : ''}`,
-      `Gate ${to}: ${daniel.has(to) ? 'blue chart natal' : ''}${daniel.has(to) && camille.has(to) ? ' + ' : ''}${camille.has(to) ? 'pink chart natal' : ''}${transitGates.has(to) ? `${daniel.has(to) || camille.has(to) ? ' + ' : ''}transit` : ''}`
-    ]
+    contributions: [`Gate ${from}: ${gateContributors(from)}`, `Gate ${to}: ${gateContributors(to)}`]
   }));
 }
 
@@ -124,6 +128,14 @@ async function buildChartContext() {
   const camilleGates = parseGates('#camilleGates');
   if (!danielGates.size || !camilleGates.size) throw new Error('The selected charts are still being calculated. Wait a moment and try again.');
   const transitGates = new Set(snapshot.gates);
+  const children = (window.hdRelationshipChildren || []).map(child => {
+    const gates = new Set(child.gates || []);
+    return {
+      name: child.name || child.id || 'Child chart',
+      natalGates: [...gates].sort((a, b) => a - b),
+      currentlyActiveChannels: activeChannels(definitions, gates, transitGates)
+    };
+  });
   const durationByPlanet = Object.fromEntries(durations.map(item => [item.planet, {
     gate: item.gate,
     nextGateExit: item.exitsAt,
@@ -141,6 +153,21 @@ async function buildChartContext() {
       currentlyActiveChannels: activeChannels(definitions, camilleGates, transitGates)
     }
   };
+  const familyCharts = [
+    { name: charts.blue.name, natalGates: danielGates },
+    { name: charts.pink.name, natalGates: camilleGates },
+    ...children.map(child => ({ name: child.name, natalGates: new Set(child.natalGates) }))
+  ];
+  const familyConnections = [];
+  for (let i = 0; i < familyCharts.length; i++) {
+    for (let j = i + 1; j < familyCharts.length; j++) {
+      const bridges = bridgesBetween(definitions, familyCharts[i], familyCharts[j], transitGates);
+      if (bridges.length) familyConnections.push({
+        people: [familyCharts[i].name, familyCharts[j].name],
+        channels: bridges
+      });
+    }
+  }
   return {
     asOf: snapshot.timestamp,
     asOfLocal: new Date(snapshot.epoch * 1000).toLocaleString(),
@@ -156,24 +183,33 @@ async function buildChartContext() {
       }))
     })),
     charts,
-    currentRelationshipBridges: relationshipBridges(definitions, danielGates, camilleGates, transitGates)
+    children,
+    currentRelationshipBridges: bridgesBetween(definitions, familyCharts[0], familyCharts[1], transitGates),
+    familyConnections
   };
 }
 
 async function waitForNatalProfiles() {
-  if (!signedIn) throw new Error('Sign in with Castalia before asking about these charts.');
   const deadline = Date.now() + 45000;
-  while (!window.hdNatalProfilesReady && Date.now() < deadline) {
-    if (window.hdNatalProfilesError) throw new Error(`The signed-in natal charts could not be loaded: ${window.hdNatalProfilesError}`);
+  if (signedIn) {
+    while (!window.hdNatalProfilesReady && Date.now() < deadline) {
+      if (window.hdNatalProfilesError) throw new Error(`The signed-in natal charts could not be loaded: ${window.hdNatalProfilesError}`);
+      await new Promise(resolve => window.setTimeout(resolve, 250));
+    }
+    if (!window.hdNatalProfilesReady) throw new Error('The signed-in natal charts are still loading. Wait a moment and try again.');
+    return;
+  }
+  if (!window.hdUsingPublicExample) throw new Error('Sign in with Castalia to get a reading for your selected charts.');
+  while (!window.hdExampleNatalProfilesReady && Date.now() < deadline) {
     await new Promise(resolve => window.setTimeout(resolve, 250));
   }
-  if (!window.hdNatalProfilesReady) throw new Error('The signed-in natal charts are still loading. Wait a moment and try again.');
+  if (!window.hdExampleNatalProfilesReady) throw new Error('The example charts are still being calculated. Wait a moment and try again.');
 }
 
 function composeUserMessage(question, context, firstReading) {
   const prior = conversation.slice(-8).map(turn => `${turn.role === 'user' ? 'User' : 'Reader'}: ${turn.text}`).join('\n');
   const prompt = firstReading
-    ? 'Give me a current transit-focused reading of these two relationship BodyGraphs. Start with a brief overview, then describe what transits add to each chart and the current relationship bridges. Include how long each active planetary gate is expected to last, with estimated local exit time and remaining duration where available.'
+    ? 'Give me a warm, specific reading of this example family BodyGraph. Start with the parent dynamic, then describe each child in relation to the family using the supplied family connections. Separate natal patterns from current transits. Highlight what transits add to the family charts and parent relationship bridges, and include estimated local exit times and remaining durations for active planetary gates where available. Keep it grounded in the supplied gates and channel guide; do not infer unsupported traits.'
     : question;
   return [
     'Verified chart and current transit context (JSON facts):',
@@ -184,20 +220,26 @@ function composeUserMessage(question, context, firstReading) {
 }
 
 async function requestReading(question, firstReading = false) {
-  if (!signedIn) return;
+  const publicExampleReading = firstReading && !signedIn && window.hdUsingPublicExample;
+  if (!signedIn && !publicExampleReading) return;
   if (!firstReading && !question.trim()) return;
   if (firstReading) firstReadingStarted = true;
-  const loading = addMessage('assistant', firstReading ? 'Reading the current chart transits…' : 'Checking the chart and current transits…');
+  const loading = addMessage('assistant', firstReading ? 'Generating the family chart reading…' : 'Checking the chart and current transits…');
   sendButton.disabled = true;
   questionBox.disabled = true;
   try {
-    const token = await window.CastaliaHumanDesignAuth?.getAccessToken();
+    const token = signedIn
+      ? await window.CastaliaHumanDesignAuth?.getAccessToken()
+      : config.supabaseAnonKey;
     if (!token) {
-      signedIn = false;
-      updateAuthUI();
-      loading.remove();
-      addMessage('assistant', 'Your Castalia session expired. Sign in again to continue.', 'error');
-      return;
+      if (signedIn) {
+        signedIn = false;
+        updateAuthUI();
+        loading.remove();
+        addMessage('assistant', 'Your Castalia session expired. Sign in again to continue.', 'error');
+        return;
+      }
+      throw new Error('Castalia sign-in is not configured for this example reading.');
     }
     const context = await buildChartContext();
     const userMessage = composeUserMessage(question, context, firstReading);
@@ -256,6 +298,10 @@ questionBox.addEventListener('keydown', event => {
     event.preventDefault();
     form.requestSubmit();
   }
+});
+window.addEventListener('castalia-example-charts-ready', () => {
+  updateAuthUI();
+  if (!panel.hidden && !signedIn && !firstReadingStarted) void requestReading('', true);
 });
 window.addEventListener('castalia-auth-change', event => {
   signedIn = Boolean(event.detail?.signedIn);
