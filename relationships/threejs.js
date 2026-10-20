@@ -72,6 +72,7 @@ try {
 }
 let sourceDocument = null;
 let loader = null;
+let natalParentsReady = false;
 const gateDescriptions = new Map();
 const channelDescriptions = new Map();
 let rebuildTimer = null;
@@ -1096,6 +1097,10 @@ function rebuildRelationship() {
   selectedKey = null;
   clearHover();
   if (!sourceDocument || !loader) return;
+  if (!natalParentsReady) {
+    setStatus('Calculating parent natal charts…');
+    return;
+  }
   flowAnimations.length = 0;
   const danielGates = parseGateList('#danielGates');
   const camilleGates = parseGateList('#camilleGates');
@@ -1437,11 +1442,15 @@ async function init() {
     loader = new SVGLoader();
     if (Array.isArray(window.hdRelationshipChildren)) familyChildren = window.hdRelationshipChildren;
     familyChildren.forEach((child, index) => { window.hdChartNames[child.id] = child.name || `Child ${index + 1}`; });
-    for (const [person, selector] of [['daniel', '.person--daniel'], ['camille', '.person--camille']]) {
-      const active = [...sourceDocument.querySelectorAll(`${selector} .gate[data-state="closed"]`)].map(g => +g.dataset.gate);
-      document.querySelector(person === 'daniel' ? '#danielGates' : '#camilleGates').value = active.join(', ');
+    // relationship.svg is geometry only; natal-auth.js supplies actual gates.
+    if (window.hdNatalPlanetaryActivations &&
+        document.querySelector('#danielGates').value.trim() &&
+        document.querySelector('#camilleGates').value.trim()) {
+      natalParentsReady = true;
+      rebuildRelationship();
+    } else {
+      setStatus('Calculating parent natal charts…');
     }
-    rebuildRelationship();
     resize();
     void refreshTransits();
     window.setInterval(() => void refreshTransits(), 15 * 60 * 1000);
@@ -1450,6 +1459,18 @@ async function init() {
     console.error(error);
   }
 }
+
+function useCalculatedNatalParents(event) {
+  const activations = event?.detail || window.hdNatalPlanetaryActivations;
+  if (!activations?.daniel?.length || !activations?.camille?.length) return;
+  natalParentsReady = true;
+  rebuildRelationship();
+  refreshRelationshipPairing();
+  refreshFrontFamilyReading();
+}
+window.addEventListener('castalia-natal-activations-updated', useCalculatedNatalParents);
+window.addEventListener('castalia-example-charts-ready', useCalculatedNatalParents);
+window.addEventListener('castalia-natal-profiles-ready', useCalculatedNatalParents);
 
 const resizeObserver = new ResizeObserver(resize);
 resizeObserver.observe(canvas);
