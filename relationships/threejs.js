@@ -1026,6 +1026,8 @@ async function init() {
       console.warn('Could not load optional gate/channel descriptions:', error);
     }
     loader = new SVGLoader();
+    if (Array.isArray(window.hdRelationshipChildren)) familyChildren = window.hdRelationshipChildren;
+    familyChildren.forEach((child, index) => { window.hdChartNames[child.id] = child.name || `Child ${index + 1}`; });
     for (const [person, selector] of [['daniel', '.person--daniel'], ['camille', '.person--camille']]) {
       const active = [...sourceDocument.querySelectorAll(`${selector} .gate[data-state="closed"]`)].map(g => +g.dataset.gate);
       document.querySelector(person === 'daniel' ? '#danielGates' : '#camilleGates').value = active.join(', ');
