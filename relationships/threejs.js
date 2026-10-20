@@ -914,6 +914,7 @@ function makePlaneGroup(paths, person, sharedChannels, relationshipChannels, opt
     const isChannel = cls.includes('channel') && !cls.includes('highlight') && !cls.includes('hit') && !cls.includes('flow');
     const isGateMarker = cls.includes('gate-marker');
     const isCenterShape = cls.includes('center-shape');
+    const centerChannelCount = isCenterShape ? Number(center?.getAttribute('data-channel-count') || 0) : 0;
     const channelId = channel ? `${Math.min(+channel.dataset.from, +channel.dataset.to)}-${Math.max(+channel.dataset.from, +channel.dataset.to)}` : null;
     const hover = describePathFeature(node, person, activationsByGate, options.transitSnapshot);
     if (hover && channelId && relationshipChannels.has(channelId)) hover.hoverKey = `relationship:channel:${channelId}`;
@@ -965,9 +966,14 @@ function makePlaneGroup(paths, person, sharedChannels, relationshipChannels, opt
       const gateFillColor = gateActivations.some(item => item.type === 'design')
         ? '#cf2943'
         : gateActivations.some(item => item.type === 'personality') ? '#24231f' : color;
-      const fillColor = isGateMarker ? (transitActive ? transitColor : gateActive ? gateFillColor : pale) : (centerActive ? color : pale);
+      const fillColor = isGateMarker ? (transitActive ? transitColor : gateActive ? gateFillColor : pale) : (centerChannelCount ? color : pale);
+      const centerTintBase = exactFrontAlignment ? 0.16 : 0.24;
+      const centerTintPerChannel = exactFrontAlignment ? 0.065 : 0.085;
+      const centerTint = centerChannelCount
+        ? Math.min(exactFrontAlignment ? 0.58 : 0.76, centerTintBase + centerChannelCount * centerTintPerChannel)
+        : 0.12;
       const fillOpacity = isCenterShape
-        ? (centerActive ? (exactFrontAlignment ? 0.3 : 0.42) : 0.48)
+        ? centerTint
         : transitActive ? 0.86 : gateActive ? (exactFrontAlignment ? 0.35 : 0.55) : 0;
       const fillMat = new THREE.MeshBasicMaterial({ color: fillColor, transparent: true, opacity: fillOpacity, side: THREE.DoubleSide, depthWrite: false });
       const outlineActive = isCenterShape ? centerActive : gateActive || transitActive;
@@ -1021,7 +1027,7 @@ function extractLayer(doc, person, gates) {
   svg.querySelectorAll('.canvas').forEach(el => el.remove());
   svg.querySelectorAll('.person--daniel, .person--camille').forEach(el => { if (el !== keep) el.remove(); });
   keep.querySelectorAll('.gate').forEach(g => g.setAttribute('data-state', gates.has(+g.dataset.gate) ? 'closed' : 'open'));
-  const definedCenters = new Set();
+  const centerChannelCounts = new Map();
   const gateCenters = new Map([...keep.querySelectorAll('.gate[data-gate][data-center]')].map(gate => [+gate.dataset.gate, gate.dataset.center]));
   keep.querySelectorAll('.channel-group[data-from][data-to]').forEach(ch => {
     const defined = gates.has(+ch.dataset.from) && gates.has(+ch.dataset.to);
@@ -1029,12 +1035,14 @@ function extractLayer(doc, person, gates) {
     if (defined) {
       const fromCenter = gateCenters.get(+ch.dataset.from);
       const toCenter = gateCenters.get(+ch.dataset.to);
-      if (fromCenter) definedCenters.add(fromCenter);
-      if (toCenter) definedCenters.add(toCenter);
+      if (fromCenter) centerChannelCounts.set(fromCenter, (centerChannelCounts.get(fromCenter) || 0) + 1);
+      if (toCenter) centerChannelCounts.set(toCenter, (centerChannelCounts.get(toCenter) || 0) + 1);
     }
   });
   keep.querySelectorAll('.center').forEach(center => {
-    center.setAttribute('data-defined', String(definedCenters.has(center.dataset.center)));
+    const count = centerChannelCounts.get(center.dataset.center) || 0;
+    center.setAttribute('data-defined', String(count > 0));
+    center.setAttribute('data-channel-count', String(count));
   });
   svg.querySelectorAll('script,#gate-state-legend,#flow-control,#flow-direction-legend,#svg-tooltip').forEach(el => el.remove());
   svg.setAttribute('viewBox', '0 0 360 360');
