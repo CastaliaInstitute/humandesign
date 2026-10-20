@@ -13,7 +13,7 @@ const status = document.querySelector('#status');
 const scene = new THREE.Scene();
 scene.background = new THREE.Color('#f8f5ed');
 const chartViewHeight = 360;
-const parentChartScale = 0.62;
+const parentChartScale = 0.9;
 // Orthographic projection keeps parallel chart planes the same apparent size,
 // which is essential for a mathematically exact front overlap.
 const camera = new THREE.OrthographicCamera(-300, 300, 300, -300, 1, 3000);
@@ -84,7 +84,7 @@ let autoRotate = !reduceMotion;
 const autoRotateSpeed = 0.035; // radians per second; one slow turn takes about three minutes
 const colors = { daniel: new THREE.Color('#087fa5'), camille: new THREE.Color('#cf4f79') };
 const childPalette = ['#488f73', '#b67a37', '#7864a6', '#518a9d'].map(color => new THREE.Color(color));
-const familyLayout = { parentScale: parentChartScale, childScale: parentChartScale, parentRadius: 400 };
+const familyLayout = { parentScale: parentChartScale, childScale: parentChartScale, parentRadius: 115 };
 function childPlaneRadius() {
   return Number(document.querySelector('#separation').value) / 2;
 }
@@ -1248,14 +1248,14 @@ function resize() {
   const chartHalfWidth = 194.4 * familyLayout.parentScale;
   // Fit the complete circular footprint (outer center plus half a chart),
   // then compensate for the camera zoom so the wider family remains visible.
-  const framingZoom = 1.12;
-  const halfWidth = (furthestChild + chartHalfWidth + 16) * framingZoom;
-  const halfHeight = Math.max((chartViewHeight * familyLayout.parentScale / 2 + 20) * framingZoom, halfWidth / aspect);
+  const framingZoom = 1.04;
+  const halfWidth = (furthestChild + chartHalfWidth + 10) * framingZoom;
+  const halfHeight = Math.max((chartViewHeight * familyLayout.parentScale / 2 + 12) * framingZoom, halfWidth / aspect);
   camera.left = -halfWidth;
   camera.right = halfWidth;
   camera.top = halfHeight;
   camera.bottom = -halfHeight;
-  camera.zoom = 1.12;
+  camera.zoom = 1.18;
   camera.updateProjectionMatrix();
 }
 function setSeparation(value) {
@@ -1276,7 +1276,7 @@ function orient(mode) {
   controls.minPolarAngle = 0;
   controls.maxPolarAngle = Math.PI;
   controls.reset();
-  camera.zoom = 1.12;
+  camera.zoom = 1.18;
   camera.updateProjectionMatrix();
   if (mode === 'edge') camera.position.set(800, familyViewCenterY, 0.01);
   else camera.position.set(0, familyViewCenterY, 820);
