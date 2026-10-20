@@ -36,9 +36,11 @@
     const longitude = interpolatedLongitude(values, index);
     return longitude == null ? null : (planet === 'earth' ? (longitude + 180) % 360 : longitude);
   }
-  async function currentSnapshot(now = new Date()) {
+  async function snapshotAt(now = new Date(), noCache = false) {
+    now = now instanceof Date ? now : new Date(now);
+    if (!Number.isFinite(now.getTime())) throw new Error('Choose a valid date and time for the transit snapshot.');
     const epoch = now.getTime() / 1000;
-    const data = await monthData(epoch, true);
+    const data = await monthData(epoch, noCache);
     if (!Number.isFinite(data.t0) || !Number.isFinite(data.step) || !data.bodies) throw new Error('Transit ephemeris has an unsupported format.');
     const sampleIndex = (epoch - data.t0) / data.step;
     if (sampleIndex < 0 || sampleIndex >= Math.min(...Object.values(data.bodies).map(values => values.length))) {
@@ -66,6 +68,10 @@
       coordinate: data.coordinate || 'tropical-ecliptic',
       sampleStepSeconds: data.step
     };
+  }
+
+  async function currentSnapshot(now = new Date()) {
+    return snapshotAt(now, true);
   }
 
   async function nextGateChange(planet, startEpoch, currentGate, maxDays = 240) {
@@ -182,5 +188,5 @@
     window.setInterval(refresh, 15 * 60 * 1000);
   }
 
-  window.CastaliaHumanDesignTransit = { GATE_ORDER, gateAt, currentSnapshot, estimateDurations, installSvg };
+  window.CastaliaHumanDesignTransit = { GATE_ORDER, gateAt, currentSnapshot, snapshotAt, estimateDurations, installSvg };
 })();

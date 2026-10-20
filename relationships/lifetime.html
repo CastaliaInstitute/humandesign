@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Castalia Human Design · Family Lifetime Explorer</title>
+<style>
+:root{color-scheme:light;--ink:#292820;--paper:#f4f0e5;--muted:#746e61;--line:#d9d1be;--daniel:#218caf;--camille:#d96f8c;--gold:#eab64b}*{box-sizing:border-box}body{margin:0;background:radial-gradient(ellipse at 50% 20%,#fffdf6,#ece6d8);color:var(--ink);font:15px/1.45 system-ui,-apple-system,sans-serif}.shell{max-width:1120px;margin:auto;padding:28px 24px 48px}.top{display:flex;align-items:center;justify-content:space-between;gap:18px}.back{color:#575346;text-decoration:none;font-size:13px}.eyebrow{text-transform:uppercase;letter-spacing:.16em;font-size:11px;color:var(--muted);font-weight:700}h1{font:500 clamp(34px,5vw,58px)/1.02 Georgia,serif;letter-spacing:-.035em;margin:10px 0}.intro{max-width:720px;color:#5c584e}.layout{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(280px,.7fr);gap:22px;margin-top:24px;align-items:start}.viewer,.panel{background:#fffdf8d9;border:1px solid var(--line);border-radius:20px;box-shadow:0 14px 42px #4c3d2110}.viewer{overflow:hidden}.viewer-head{display:flex;justify-content:space-between;gap:12px;align-items:center;padding:14px 18px;border-bottom:1px solid var(--line)}.key{display:flex;gap:14px;flex-wrap:wrap;color:#625d52;font-size:12px}.key span{display:flex;align-items:center;gap:7px}.swatch{width:10px;height:10px;border-radius:50%;display:inline-block}.swatch.blue{background:var(--daniel)}.swatch.pink{background:var(--camille)}.drag-hint{font-size:11px;color:#81796a;white-space:nowrap}#scene{display:block;width:100%;height:min(72vw,620px);min-height:420px;touch-action:none;cursor:grab}#scene:active{cursor:grabbing}#sceneTip{position:fixed;z-index:10;max-width:min(260px,calc(100vw - 24px));padding:9px 12px;border:1px solid #eab64b;border-radius:9px;background:#292820;color:#fffaf0;box-shadow:0 8px 24px #29282030;pointer-events:none;font-size:12px;line-height:1.35}#sceneTip[hidden]{display:none}#sceneTip strong,#sceneTip span{display:block}#sceneTip span{margin-top:3px;color:#e7dfce;font-size:11px}.panel{padding:20px}.panel h2{font:500 24px Georgia,serif;margin:0 0 6px}.panel p{font-size:13px;color:#655f53;margin:5px 0 16px}.range-row{display:flex;align-items:center;gap:10px}.range-row input{width:100%;accent-color:#8a7560}.range-value{min-width:50px;text-align:right;font-variant-numeric:tabular-nums;font-weight:700}.control{padding:14px 0;border-top:1px solid var(--line)}.control:first-of-type{border-top:0}.control-title{display:flex;justify-content:space-between;align-items:center;font-size:13px;font-weight:700;margin-bottom:9px}.toggle{display:flex;gap:9px;align-items:center;color:#575346;font-size:13px;margin:9px 0}.toggle input{accent-color:#6e7869}.panel textarea{display:block;width:100%;margin:6px 0 10px;border:1px solid var(--line);border-radius:9px;padding:9px;background:#fffefb;color:var(--ink);font:11px/1.5 ui-monospace,monospace;resize:vertical}.buttons{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}.buttons button{border:1px solid var(--line);background:#f8f4ea;color:var(--ink);border-radius:999px;padding:8px 12px;cursor:pointer;font:600 12px system-ui}.buttons button:hover{background:#efe8d8}.status{min-height:20px;font-size:11px;color:#746e61;margin-top:12px}.note{font-size:11px!important;color:#807868!important}.error{padding:24px;color:#8a3939}@media(max-width:800px){.shell{padding:20px 14px 36px}.layout{grid-template-columns:1fr}.viewer-head{align-items:flex-start;flex-direction:column}.drag-hint{white-space:normal}#scene{height:76vw;min-height:340px}.panel{padding:17px}}
+</style>
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.186.1/examples/jsm/"}}</script>
+<style>
+html,body{width:100%;height:100%;margin:0;overflow:hidden}.shell{width:100vw;height:100vh;max-width:none;margin:0;padding:0}.shell>.top,.shell>h1,.shell>.intro,.layout>.panel,.viewer-head{display:none!important}.layout{display:block;width:100%;height:100%;margin:0}.viewer{width:100%;height:100%;padding:0;border:0;border-radius:0;box-shadow:none;background:transparent;overflow:hidden}#scene{display:block;width:100vw;height:calc(100vh - 220px);touch-action:none}
+#authPanel{position:fixed;z-index:20;top:14px;left:14px;max-width:min(370px,calc(100vw - 28px));padding:12px 14px;border:1px solid #d9d1be;border-radius:12px;background:#fffdf0e8;box-shadow:0 5px 22px #29282020;font:13px/1.4 system-ui,sans-serif}#authPanel button,#profilePicker select{border:1px solid #d9d1be;border-radius:7px;background:#f8f4ea;padding:7px 10px;color:#292820;font:inherit}#authStatus{margin:7px 0 0;color:#625d52;font-size:11px}#profilePicker{margin-top:8px}#profilePicker select{width:100%;margin:4px 0 2px}#chartNameA,#chartNameB{font-weight:600}
+</style>
+
+<style>
+:root{--daniel:#087fa5;--camille:#cf4f79}
+#authPanel{position:fixed;padding:15px 16px 12px;background:rgba(255,253,247,.91);backdrop-filter:blur(14px);border-color:#d8d0be;box-shadow:0 8px 28px rgba(49,43,30,.14)}
+#authPanel::before{content:"";position:absolute;left:0;right:0;top:0;height:3px;border-radius:12px 12px 0 0;background:linear-gradient(90deg,var(--daniel) 0 50%,var(--camille) 50% 100%)}
+#signIn{background:var(--daniel);color:#fff;border-color:var(--daniel);border-radius:999px;padding:8px 13px;font-weight:650;cursor:pointer;transition:background .16s ease,transform .16s ease}
+#signIn:hover{background:#066887;transform:translateY(-1px)}
+#signOut{border-radius:999px;cursor:pointer}
+#authStatus{max-width:310px}
+#authPanel.is-editing{max-width:min(580px,calc(100vw - 28px))}
+#toggleBirthDetails,#applyBirthDetails{margin-top:9px;border-radius:999px;cursor:pointer}
+#birthDetails{margin-top:12px;padding-top:11px;border-top:1px solid #e1dacb}
+.birth-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.birth-note{margin:0 0 8px;color:#746e61;font-size:11px;line-height:1.4}.birth-card{min-width:0;margin:0;padding:10px;border:1px solid #ded6c8;border-radius:10px;background:#fffefa}
+.birth-card legend{padding:0 4px;font-size:12px;font-weight:700}
+.birth-card.blue legend{color:var(--daniel)}.birth-card.pink legend{color:var(--camille)}
+.birth-card label{display:block;margin:6px 0;color:#625d52;font-size:11px}
+.birth-card input{display:block;width:100%;margin-top:3px;padding:7px;border:1px solid #ddd5c7;border-radius:6px;background:#fff;color:#292820;font:13px system-ui,sans-serif}
+.birth-card label.verify{display:flex;align-items:flex-start;gap:6px;line-height:1.3}
+.birth-card label.verify input{width:auto;margin:1px 0 0;accent-color:#6b776e}
+#applyBirthDetails{background:var(--daniel);color:#fff;border-color:var(--daniel)}
+@media(max-width:520px){.birth-grid{grid-template-columns:1fr}#authPanel.is-editing{max-height:calc(100vh - 28px);overflow:auto}}
+</style>
+<style>
+#authPanel{display:flex;flex-direction:column;gap:8px}
+.auth-bar{display:flex;align-items:center;gap:8px}
+#menuToggle{border:1px solid #d9d1be;border-radius:7px;background:#f8f4ea;padding:6px 10px;color:#292820;cursor:pointer;font:700 16px/1 system-ui,sans-serif}
+#authMenu{display:none;flex-direction:column;gap:8px}
+#authPanel.is-open #authMenu{display:flex}
+#authPanel .auth-bar #authStatus{margin:0;max-width:none}
+#authMenu .transit-toggle{display:flex;align-items:center;gap:8px;color:#575346;font-size:12px;cursor:pointer}
+#authMenu .transit-toggle input{margin:0;accent-color:#7c3aed}
+#authMenu #transitStatus{margin:0 0 2px 22px;color:#746e61;font-size:10px;line-height:1.35}
+#authMenu .page-link{display:block;padding:7px 10px;border:1px solid #d9d1be;border-radius:8px;background:#f8f4ea;color:#292820;text-decoration:none;font-size:12px}
+#authMenu .page-link:hover{background:#efe8d8}
+</style>
+<style>
+#familyReading{position:fixed;left:16px;right:16px;bottom:12px;z-index:12;width:auto;height:128px;max-height:128px;overflow:auto;padding:9px 12px;border:1px solid #d9d1be;border-radius:13px;background:rgba(255,253,247,.96);box-shadow:0 8px 28px rgba(49,43,30,.14);backdrop-filter:blur(14px);color:var(--chart-text-color,#292820);font:12px/1.4 system-ui,sans-serif;overscroll-behavior:contain}
+#familyReading h2{margin:0 0 6px;font:600 14px/1.3 system-ui,sans-serif}
+#familyReading .reading-heading{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:5px}
+#familyReading .reading-heading h2{margin:0}
+#generateFamilyReading{flex:none;border:1px solid #d9d1be;border-radius:999px;padding:5px 9px;background:#292820;color:#fffaf0;font:600 10px/1.2 system-ui,sans-serif;cursor:pointer}
+#generateFamilyReading:disabled{opacity:.6;cursor:wait}
+#familyReading .ai-reading{padding-top:4px}
+#familyReading .ai-reading-label{display:block;margin:2px 0 5px;color:#807868;font-size:9px;font-weight:700;letter-spacing:.07em;text-transform:uppercase}
+#familyReading p{margin:5px 0;color:inherit}
+#familyReading small{display:block;margin-top:8px;color:#807868;font-size:10px}
+.reading-feature-link{display:inline;border:0;border-radius:3px;padding:0 1px;background:transparent;color:inherit;font:inherit;font-weight:700;text-decoration:underline;text-decoration-style:dotted;text-underline-offset:2px;cursor:pointer}
+.reading-feature-link:hover,.reading-feature-link:focus-visible,.reading-feature-link[aria-pressed="true"]{background:#ffd166;color:#292820;outline:0}
+@media(max-width:520px){#scene{height:calc(100vh - 18vh - 120px - env(safe-area-inset-bottom))}#familyReading{left:10px;right:10px;bottom:calc(8px + env(safe-area-inset-bottom));width:auto;height:18vh;min-height:118px;max-height:155px;padding:8px 10px}}
+#rotationReadout{position:fixed;left:16px;bottom:220px;z-index:13;padding:7px 11px;border:1px solid rgba(217,209,190,.9);border-radius:999px;background:rgba(255,253,247,.91);box-shadow:0 4px 16px rgba(49,43,30,.12);backdrop-filter:blur(12px);color:#514d43;font:600 11px/1.2 ui-monospace,monospace;font-variant-numeric:tabular-nums;pointer-events:none}
+@media(max-width:520px){#rotationReadout{left:10px;bottom:calc(18vh + 120px + env(safe-area-inset-bottom))}}
+#authPanel.is-open{max-height:calc(100vh - 28px);overflow:auto}
+</style>
+<style>
+#lifetimeTimeline{position:fixed;left:14px;right:14px;bottom:calc(146px + env(safe-area-inset-bottom));z-index:16;padding:8px 11px;border:1px solid rgba(217,209,190,.94);border-radius:12px;background:rgba(255,253,247,.94);box-shadow:0 6px 22px rgba(49,43,30,.13);backdrop-filter:blur(14px);color:#514d43;font:11px/1.25 system-ui,sans-serif}
+#lifetimeTimeline .timeline-controls{display:grid;grid-template-columns:auto auto auto auto minmax(80px,1fr) minmax(148px,auto);align-items:center;gap:8px}
+#lifetimeTimeline button{border:1px solid #d9d1be;border-radius:999px;padding:6px 10px;background:#f8f4ea;color:#292820;font:600 11px system-ui,sans-serif;cursor:pointer}
+#lifetimeTimeline button:hover{background:#efe8d8}
+#lifetimeTimeline input[type=range]{width:100%;min-width:60px;accent-color:#087fa5}
+#lifetimeTimeline input[type=datetime-local]{width:100%;min-width:0;border:1px solid #d9d1be;border-radius:7px;padding:5px 6px;background:#fffefa;color:#292820;font:11px system-ui,sans-serif}
+#timelineAge{min-width:53px;font-variant-numeric:tabular-nums;font-weight:700}
+#lifetimeTimeline .timeline-meta{display:flex;justify-content:space-between;gap:12px;margin-top:5px;color:#807868;font-size:10px}
+#timelineFamilyAges{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#timelineStatus{flex:none}
+@media(max-width:520px){#lifetimeTimeline{left:9px;right:9px;bottom:calc(18vh + 10px + env(safe-area-inset-bottom));padding:7px 8px}#lifetimeTimeline .timeline-controls{grid-template-columns:auto auto auto auto minmax(116px,auto);gap:5px}#lifetimeTimeline input[type=range]{grid-column:1 / 5;grid-row:2}#lifetimeTimeline input[type=datetime-local]{grid-column:5;grid-row:1 / 3}#lifetimeTimeline .timeline-meta{flex-direction:column;gap:2px;font-size:9px}#timelineStatus{display:block}}
+</style>
+<style>
+#chartChatLauncher{position:fixed;right:22px;top:14px;z-index:30;border:0;border-radius:999px;padding:13px 17px;background:#292820;color:#fffaf0;box-shadow:0 8px 28px #29282035;font:650 13px system-ui,sans-serif;cursor:pointer}
+#chartChatLauncher:hover{background:#484336;transform:translateY(-1px)}
+#chartChat{position:fixed;right:22px;bottom:calc(82px + env(safe-area-inset-bottom));z-index:31;display:flex;flex-direction:column;width:min(390px,calc(100vw - 28px));height:min(560px,calc(100dvh - 112px));min-height:300px;overflow:hidden;border:1px solid #d9d1be;border-radius:18px;background:rgba(255,253,247,.97);box-shadow:0 18px 60px #29282035;color:#292820;font:13px/1.45 system-ui,sans-serif;backdrop-filter:blur(18px)}
+#chartChat[hidden]{display:none}
+.chat-head{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:13px 15px;border-bottom:1px solid #e4ddcf;background:linear-gradient(90deg,#218caf16,#d96f8c16)}
+.chat-head strong{font:500 19px Georgia,serif}.chat-head small{display:block;color:#746e61;font-size:10px}
+.chat-head button,.chat-login button,.chat-send{border:1px solid #d9d1be;border-radius:999px;background:#f8f4ea;color:#292820;padding:7px 11px;font:600 12px system-ui,sans-serif;cursor:pointer}
+#chatMessages{flex:1;overflow:auto;padding:14px;display:flex;flex-direction:column;gap:10px;overscroll-behavior:contain}
+.chat-message{max-width:92%;padding:10px 12px;border-radius:13px;white-space:pre-wrap;overflow-wrap:anywhere}
+.chat-message.assistant{align-self:flex-start;background:#f0ecdf;color:#38352d;border-bottom-left-radius:4px}
+.chat-message.user{align-self:flex-end;background:#087fa5;color:white;border-bottom-right-radius:4px}
+.chat-message.error{background:#fbefeb;color:#843a31}
+.chat-meta{margin-top:6px;color:#807868;font-size:10px}
+.chat-login{padding:14px;border-top:1px solid #e4ddcf;color:#625d52;font-size:11px}
+.chat-login button{margin-top:8px;background:#087fa5;border-color:#087fa5;color:white}
+.chat-compose{display:flex;align-items:flex-end;gap:8px;padding:10px;border-top:1px solid #e4ddcf;background:#fffefa}
+.chat-compose[hidden]{display:none}
+#chatQuestion{flex:1;min-height:42px;max-height:110px;resize:vertical;border:1px solid #d9d1be;border-radius:12px;padding:10px;background:white;color:#292820;font:13px/1.4 system-ui,sans-serif}
+.chat-send{min-height:40px;background:#292820;color:#fffaf0;border-color:#292820}.chat-send:disabled,#chatQuestion:disabled{opacity:.55;cursor:wait}
+.chat-privacy{padding:0 13px 9px;color:#81796a;font-size:9px;background:#fffefa}
+@media(max-width:520px){#chartChatLauncher{right:10px;top:14px;padding:12px 15px}#chartChat{left:10px;right:10px;bottom:calc(72px + env(safe-area-inset-bottom));width:auto;height:min(560px,calc(100dvh - 96px));border-radius:16px}}
+</style>
+</head>
+<body><div id="authPanel">
+  <div class="auth-bar">
+    <button id="menuToggle" type="button" aria-expanded="false" aria-controls="authMenu" aria-label="Open account menu">☰</button>
+    <div id="authStatus" role="status" aria-live="polite">Example charts: Daniel and Camille. Sign in to load profiles from GitHub.</div>
+  </div>
+  <div id="authMenu" hidden>
+    <button id="signIn" type="button">Sign in with Castalia</button>
+    <a class="page-link" href="/relationships/threejs.html">Open relationship viewer</a>
+    <button id="signOut" type="button" hidden>Sign out</button>
+    <label class="transit-toggle"><input id="showTransits" type="checkbox" checked> Show transits at selected time</label>
+    <div class="status" id="transitStatus" aria-live="polite">Loading current transits…</div>
+    <div id="profilePicker" hidden><label>Blue chart<select id="personA"></select></label><label>Pink chart<select id="personB"></select></label></div>
+    <button id="toggleBirthDetails" type="button">Edit example birth details</button>
+    <div id="birthDetails" hidden><p class="birth-note">Daniel and Camille are public example charts. Sign in to switch profiles; edits are saved in this browser.</p><div class="birth-grid"><fieldset class="birth-card blue"><legend>Blue chart · <span id="birthNameA">Daniel</span></legend><label>Birth date<input id="birthDateA" type="date"></label><label>Local birth time<input id="birthTimeA" type="text" inputmode="text"></label><label>Birth place<input id="birthPlaceA" type="text" autocomplete="off"></label><label>Time zone<input id="birthZoneA" type="text" placeholder="America/New_York" autocomplete="off"></label><label class="verify"><input id="birthVerifiedA" type="checkbox"> I have verified this birth time</label></fieldset><fieldset class="birth-card pink"><legend>Pink chart · <span id="birthNameB">Camille</span></legend><label>Birth date<input id="birthDateB" type="date"></label><label>Local birth time<input id="birthTimeB" type="text" inputmode="text"></label><label>Birth place<input id="birthPlaceB" type="text" autocomplete="off"></label><label>Time zone<input id="birthZoneB" type="text" placeholder="America/New_York" autocomplete="off"></label><label class="verify"><input id="birthVerifiedB" type="checkbox"> I have verified this birth time</label></fieldset></div><button id="applyBirthDetails" type="button">Calculate both charts</button></div>
+  </div>
+</div>
+<section id="lifetimeTimeline" aria-label="Family lifetime transit timeline">
+  <div class="timeline-controls">
+    <button id="timelineBirth" type="button" title="Move to birth" disabled>Birth</button>
+    <button id="timelinePlay" type="button" aria-pressed="false" disabled>Play</button>
+    <button id="timelineNow" type="button" title="Move to the current date and time" disabled>Now</button>
+    <output id="timelineAge">Age —</output>
+    <input id="timelineAgeSlider" type="range" min="0" max="100" step="0.001" value="0" aria-label="Age from birth through 100 years" disabled>
+    <input id="timelineDateTime" type="datetime-local" aria-label="Selected transit date and time" disabled>
+  </div>
+  <div class="timeline-meta"><span id="timelineFamilyAges">Set a verified birth profile to begin the lifetime timeline.</span><span id="timelineStatus" role="status" aria-live="polite">Transits use the selected date and time.</span></div>
+</section>
+<button id="chartChatLauncher" type="button" aria-expanded="false" aria-controls="chartChat">✦ Generate AI reading</button>
+<section id="chartChat" role="dialog" aria-label="Human Design transit chat" aria-modal="false" hidden>
+  <header class="chat-head"><div><strong>Chart & transit reading</strong><small>Castalia Astrolabe · selected-time ephemeris</small></div><button id="closeChartChat" type="button" aria-label="Close chart chat">Close</button></header>
+  <div id="chatMessages" role="log" aria-live="polite" aria-relevant="additions text"></div>
+  <div class="chat-login" id="chatLogin"><span id="chatLoginText">Sign in with Castalia to get a reading and ask questions about the charts.</span><br><button id="chatSignIn" type="button">Sign in with Castalia</button></div>
+  <form class="chat-compose" id="chatForm" hidden><textarea id="chatQuestion" aria-label="Ask a question about the chart" placeholder="Ask about these transits…" maxlength="1000"></textarea><button class="chat-send" id="chatSend" type="submit">Send</button></form>
+  <div class="chat-privacy">Selected chart activations and current transit data are sent to Castalia’s LLM. The public example can be read without sign-in; follow-up questions require sign-in. Conversations are not saved to this browser.</div>
+</section>
+<main class="shell"><div class="top"><div class="eyebrow">Human Design · lifetime transit exploration</div><a class="back" href="/relationships/threejs.html">← Relationship viewer</a></div><h1>Explore the family BodyGraph through a lifetime</h1><p class="intro">Scrub through the selected chart’s first 100 years or play the timeline. The date and time update each person’s transit activations and the family’s relationship channels, so you can see how the shared picture changes over time.</p><div class="layout"><section class="viewer"><div class="viewer-head"><div class="key"><span><i class="swatch blue"></i><b id="chartNameA">Person 1</b> · center plane</span><span><i class="swatch pink"></i><b id="chartNameB">Person 2</b> · center plane</span></div><div class="drag-hint">Hover gates and channels for tips · tap a gate or channel to show its tip · drag to orbit the camera · ←/→ rotate the family · [ / ] rotate exactly 45° · ←/→ fine turn · scroll to zoom · right-drag to pan</div></div><canvas id="scene" aria-label="Family BodyGraph lifetime explorer. Scrub ages 0 through 100 to update transits for each chart and family relationship channels. Tap a gate or channel to show its tip."></canvas></section><aside id="familyReading" role="region" aria-live="polite" aria-label="Front-facing chart comparison"><div class="reading-heading"><h2 id="familyReadingTitle">Family chart comparison</h2><button id="generateFamilyReading" type="button">✦ AI reading</button></div><div id="familyReadingBody"><p>Loading natal chart comparison…</p></div></aside><div id="sceneTip" role="tooltip" hidden></div><aside class="panel"><h2>Family lifetime timeline</h2><p>Use the timeline controls to move through a 100-year span from the selected verified birth profile. Transits update each bodygraph individually; relationship bridges include any channel completed by natal or transit gate activations.</p><div class="control"><div class="control-title"><label for="separation">Plane separation · family diameter</label><output id="separationValue" class="range-value">440</output></div><div class="range-row"><input id="separation" type="range" min="12" max="900" value="440" step="1"><span>units</span></div></div><div class="control"><div class="control-title">Chart layers</div><label class="toggle"><input id="showDaniel" type="checkbox" checked> Show the blue parent</label><label class="toggle"><input id="showCamille" type="checkbox" checked> Show the pink parent</label></div><div class="control"><div class="control-title">Gate activations</div><label for="danielGates" class="note">Blue parent</label><textarea id="danielGates" rows="3" spellcheck="false" aria-label="Blue parent activated gates"></textarea><label for="camilleGates" class="note">Pink parent</label><textarea id="camilleGates" rows="3" spellcheck="false" aria-label="Pink parent activated gates"></textarea><div class="note">Gate activations are calculated from each selected profile’s birth details.</div><label class="toggle"><input id="showBridges" type="checkbox" checked> Show relationships between overlapping charts</label></div>
+<div class="control"><div class="control-title">View</div><div class="buttons"><button id="front">Exact front overlap</button><button id="edge">View family from side</button><button id="reset">Reset view</button></div></div><div class="status" id="status" aria-live="polite">Loading BodyGraph template…</div><p class="note">This is a geometric view of the SVG layers, not a compatibility score.</p></aside></div></main>
+<script src="/config.js"></script><script type="module" src="../natal-auth.js?v=lifetime-timeline-20261020"></script><script type="module" src="./threejs.js?v=lifetime-timeline-20261020"></script><script type="module" src="./chart-chat.js?v=lifetime-timeline-20261020"></script></body></html>

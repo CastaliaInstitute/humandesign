@@ -300,6 +300,8 @@ async function applyProfiles(signedInChart = false, publicExample = false) {
   status('Calculating Human Design activations…');
   try {
     const [chartA, chartB] = await Promise.all([activeChart(a), activeChart(b)]);
+    window.hdFamilyBirthEpochs = { ...(window.hdFamilyBirthEpochs || {}), daniel: epochFor(a), camille: epochFor(b) };
+    window.hdTimelineAnchor = { person: 'daniel', name: a.name || 'Person 1', birthEpoch: window.hdFamilyBirthEpochs.daniel };
     document.querySelector('#danielGates').value = chartA.gates.join(', ');
     document.querySelector('#camilleGates').value = chartB.gates.join(', ');
     window.hdNatalPlanetaryActivations = { daniel: chartA.activations, camille: chartB.activations };
@@ -307,6 +309,7 @@ async function applyProfiles(signedInChart = false, publicExample = false) {
     document.querySelector('#danielGates').dispatchEvent(new Event('input', { bubbles: true }));
     document.querySelector('#camilleGates').dispatchEvent(new Event('input', { bubbles: true }));
     displayProfile(a, 'daniel'); displayProfile(b, 'camille');
+    window.dispatchEvent(new CustomEvent('castalia-timeline-anchor-updated', { detail: window.hdTimelineAnchor }));
     status(`${names.daniel} and ${names.camille} charts calculated. Form edits are saved in this browser.`);
     window.hdUsingPublicExample = Boolean(publicExample && !signedInChart);
     if (window.hdUsingPublicExample) {

@@ -10,7 +10,7 @@ https://humandesign.castalia.institute/
 
 ## Local preview
 
-Serve this directory over HTTP (for example `python3 -m http.server 8765`) and open `/relationships/threejs.html`.
+Serve this directory over HTTP (for example `python3 -m http.server 8765`) and open `/relationships/threejs.html` for the relationship viewer or `/relationships/lifetime.html` for the family lifetime transit explorer.
 
 ## Natal data contract
 

@@ -1,6 +1,6 @@
 import * as THREE from 'three';
-import '../transit-data.js?family-circle-108-20261019';
-import { generatePublicDemoReading } from './public-demo-readings.js?v=family-opportunities-20261020';
+import '../transit-data.js?family-circle-108-20261019&lifetime-timeline-20261020';
+import { generatePublicDemoReading } from './public-demo-readings.js?v=lifetime-timeline-20261020';
 import { publicPairRecurrence, publicFamilyRecurrence } from './relationship-recurrence-data.js?v=family-opportunities-20261020';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { SVGLoader } from 'three/addons/loaders/SVGLoader.js';
@@ -67,6 +67,7 @@ const familyGroups = {};
 let familyChildren = [];
 let transitSnapshot = null;
 let transitDurationEstimates = [];
+let lifetimeTimelineActive = false;
 const transitToggle = document.querySelector('#showTransits');
 try {
   transitToggle.checked = localStorage.getItem('castalia-hd-show-transits') !== 'false';
@@ -334,7 +335,7 @@ function transitGateWindow(gate) {
   return `expected through about ${formatted}`;
 }
 function transitPlanetNames(gate) {
-  return transitSnapshot?.gatePlanets?.[gate]?.join(', ') || 'current transit';
+  return transitSnapshot?.gatePlanets?.[gate]?.join(', ') || 'transit';
 }
 function personCurrentlyInFront() {
   chartRoot.updateMatrixWorld(true);
@@ -444,7 +445,9 @@ function frontFamilyReading() {
       return pair;
     }),
     transitsShown: Boolean(transitToggle.checked),
-    transitAsOf: transitSnapshot ? new Date(transitSnapshot.epoch * 1000).toLocaleString() : null
+    transitAsOf: transitSnapshot ? new Date(transitSnapshot.epoch * 1000).toLocaleString() : null,
+    transitEpoch: transitSnapshot ? transitSnapshot.epoch * 1000 : null,
+    lifetimeTimeline: lifetimeTimelineActive
   };
   viewContext.familyRecurrence = publicFamilyRecurrence([viewContext.frontPerson, ...viewContext.relationships.map(pair => pair.charts[1])]);
   readingViewKey = JSON.stringify(viewContext);
@@ -487,7 +490,7 @@ function frontFamilyReading() {
     const transitSection = document.createElement('p');
     const asOf = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(transitSnapshot.epoch * 1000));
     if (!transitChannels.length) {
-      transitSection.textContent = `At ${asOf}, the current transits do not complete a new channel in ${frontName}'s chart, so there is no temporary channel change to highlight.`;
+      transitSection.textContent = `At ${asOf}, the transits do not complete a new channel in ${frontName}'s chart, so there is no temporary channel change to highlight.`;
     } else {
       const channelDetails = transitChannels.map(channel => {
         const names = channel.reading?.name ? ` · ${channel.reading.name}` : '';
@@ -495,7 +498,7 @@ function frontFamilyReading() {
         return `the ${channel.label}${names} channel is temporarily complete while ${bounds}; after the contributing transit gate moves on, it will no longer be completed by the transit`;
       });
       const centers = temporaryCenters.length ? ` Together, these activations temporarily define ${temporaryCenters.map(center => centerDescriptions[center]?.[0] || center).join(', ')}.` : '';
-      transitSection.textContent = `At ${asOf}, current transits temporarily complete ${channelDetails.join('; ')}.${centers}`;
+      transitSection.textContent = `At ${asOf}, the transits temporarily complete ${channelDetails.join('; ')}.${centers}`;
     }
     appendReadingText(transitSection, transitSection.textContent);
     root.append(transitSection);
@@ -571,9 +574,9 @@ function frontFamilyReading() {
         const connectionText = temporaryConnections.map(({ channel, temporaryGates }) => {
           const title = channel.reading?.name ? ` (${channel.reading.name})` : '';
           const gatesText = temporaryGates.map(gate => `Gate ${gate}, activated by ${transitPlanetNames(gate)}, ${transitGateWindow(gate)}`).join(' and ');
-          return `the ${channel.label}${title} channel for now, while ${gatesText}; it will no longer be completed by the transit after its contributing gate moves on`;
+          return `the ${channel.label}${title} channel temporarily, while ${gatesText}; it will no longer be completed by the transit after its contributing gate moves on`;
         });
-        facts.push(`Current transits temporarily complete ${connectionText.join('; ')}`);
+        facts.push(`${lifetimeTimelineActive ? 'At the selected time, the transits' : 'Current transits'} temporarily complete ${connectionText.join('; ')}`);
       }
     }
     const item = document.createElement('p');
@@ -1441,6 +1444,7 @@ window.addEventListener('castalia-family-children-updated', event => {
 
 async function refreshTransits() {
   const status = document.querySelector('#transitStatus');
+  if (lifetimeTimelineActive) return;
   try {
     transitSnapshot = await window.CastaliaHumanDesignTransit.currentSnapshot();
     try {
@@ -1451,11 +1455,201 @@ async function refreshTransits() {
     }
     const time = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(transitSnapshot.epoch * 1000));
     status.textContent = `As of ${time} · ${transitSnapshot.source}; Sun through Saturn + Earth. Applied per bodygraph; dashed family bridges include transit contributions.`;
+    if (!lifetimeTimelineActive && timelineStatus) timelineStatus.textContent = `Current transits · ${time}`;
     if (sourceDocument && loader) rebuildRelationship();
   } catch (error) {
     status.textContent = `Current transits unavailable: ${error.message}`;
+    if (!lifetimeTimelineActive && timelineStatus) timelineStatus.textContent = `Current transit data unavailable: ${error.message}`;
   }
 }
+
+const timelineSlider = document.querySelector('#timelineAgeSlider');
+const timelineDateTime = document.querySelector('#timelineDateTime');
+const timelineAgeOutput = document.querySelector('#timelineAge');
+const timelineStatus = document.querySelector('#timelineStatus');
+const timelineFamilyAges = document.querySelector('#timelineFamilyAges');
+const timelineBirthButton = document.querySelector('#timelineBirth');
+const timelinePlayButton = document.querySelector('#timelinePlay');
+const timelineNowButton = document.querySelector('#timelineNow');
+let lifetimeStartEpoch = null;
+let lifetimeEndEpoch = null;
+let timelineRequestId = 0;
+let timelineDebounceTimer = null;
+let timelinePlaybackFrame = null;
+let timelinePlaybackStart = null;
+let timelinePlaybackAge = 0;
+let timelinePlaybackMonth = -1;
+
+function localDateTimeValue(epoch) {
+  const date = new Date(epoch * 1000);
+  const part = value => String(value).padStart(2, '0');
+  return `${date.getFullYear()}-${part(date.getMonth() + 1)}-${part(date.getDate())}T${part(date.getHours())}:${part(date.getMinutes())}`;
+}
+
+function timelineEpochAtAge(age) {
+  return lifetimeStartEpoch + (lifetimeEndEpoch - lifetimeStartEpoch) * Math.min(100, Math.max(0, age)) / 100;
+}
+
+function updateTimelineDisplay(epoch) {
+  if (!Number.isFinite(lifetimeStartEpoch) || !Number.isFinite(lifetimeEndEpoch)) return;
+  const boundedEpoch = Math.min(lifetimeEndEpoch, Math.max(lifetimeStartEpoch, epoch));
+  const age = (boundedEpoch - lifetimeStartEpoch) / (lifetimeEndEpoch - lifetimeStartEpoch) * 100;
+  timelineSlider.value = age.toFixed(3);
+  timelineAgeOutput.value = `${age.toFixed(1)} years`;
+  timelineDateTime.value = localDateTimeValue(boundedEpoch);
+  const ages = Object.entries(window.hdFamilyBirthEpochs || {}).map(([person, birthEpoch]) => {
+    const name = window.hdChartNames?.[person] || (person === 'daniel' ? 'Person 1' : 'Person 2');
+    const years = (boundedEpoch - birthEpoch) / (365.2425 * 86400);
+    return years < 0 ? `${name}: not born` : `${name}: ${years.toFixed(1)}`;
+  });
+  const anchorName = window.hdTimelineAnchor?.name || 'Blue chart';
+  timelineFamilyAges.textContent = `${anchorName}'s 0–100 lifetime${ages.length ? ` · ${ages.join(' · ')}` : ''}`;
+  timelineNowButton.disabled = Date.now() < lifetimeStartEpoch || Date.now() > lifetimeEndEpoch;
+}
+
+let timelineSnapshotPending = false;
+let queuedTimelineEpoch = null;
+async function showTimelineTransits(epoch) {
+  if (!window.CastaliaHumanDesignTransit?.snapshotAt) return;
+  if (timelineSnapshotPending) {
+    queuedTimelineEpoch = epoch;
+    return;
+  }
+  timelineSnapshotPending = true;
+  const requestId = ++timelineRequestId;
+  const selected = new Date(epoch * 1000);
+  const formatted = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(selected);
+  timelineStatus.textContent = `Loading ${formatted}…`;
+  try {
+    const snapshot = await window.CastaliaHumanDesignTransit.snapshotAt(selected);
+    if (requestId === timelineRequestId) {
+      transitSnapshot = snapshot;
+      // The ordinary near-term exit estimates describe today's transits only;
+      // don't carry those bounds into a historical or future timeline frame.
+      transitDurationEstimates = [];
+      lifetimeTimelineActive = Math.abs(epoch - Date.now() / 1000) > 60;
+      timelineStatus.textContent = `${formatted} · ephemeris snapshot`;
+      const transitStatus = document.querySelector('#transitStatus');
+      if (transitStatus) transitStatus.textContent = `Selected time · ${formatted}; transits are applied per bodygraph.`;
+      if (sourceDocument && loader) rebuildRelationship();
+    }
+  } catch (error) {
+    if (requestId === timelineRequestId) timelineStatus.textContent = `Transit data unavailable: ${error.message}`;
+  } finally {
+    timelineSnapshotPending = false;
+    if (queuedTimelineEpoch != null) {
+      const nextEpoch = queuedTimelineEpoch;
+      queuedTimelineEpoch = null;
+      void showTimelineTransits(nextEpoch);
+    }
+  }
+}
+
+function selectTimelineEpoch(epoch, immediate = false) {
+  if (!Number.isFinite(lifetimeStartEpoch) || !Number.isFinite(lifetimeEndEpoch)) return;
+  const boundedEpoch = Math.min(lifetimeEndEpoch, Math.max(lifetimeStartEpoch, epoch));
+  updateTimelineDisplay(boundedEpoch);
+  lifetimeTimelineActive = Math.abs(boundedEpoch - Date.now() / 1000) > 60;
+  if (timelineDebounceTimer) clearTimeout(timelineDebounceTimer);
+  if (immediate) void showTimelineTransits(boundedEpoch);
+  else timelineDebounceTimer = setTimeout(() => void showTimelineTransits(boundedEpoch), 180);
+}
+
+function pauseTimeline() {
+  if (timelinePlaybackFrame != null) cancelAnimationFrame(timelinePlaybackFrame);
+  timelinePlaybackFrame = null;
+  timelinePlaybackStart = null;
+  timelinePlayButton.textContent = 'Play';
+  timelinePlayButton.setAttribute('aria-pressed', 'false');
+}
+
+function playTimelineFrame(now) {
+  if (timelinePlaybackStart == null) timelinePlaybackStart = now;
+  // One simulated month takes 0.65 seconds, so a full century takes about
+  // thirteen minutes. This keeps the moving transit pattern inspectable.
+  const age = Math.min(100, timelinePlaybackAge + (now - timelinePlaybackStart) / 1000 * (100 / (1200 * 0.65)));
+  const month = Math.floor(age * 12);
+  updateTimelineDisplay(timelineEpochAtAge(age));
+  if (month !== timelinePlaybackMonth) {
+    timelinePlaybackMonth = month;
+    void showTimelineTransits(timelineEpochAtAge(age));
+  }
+  if (age >= 100) {
+    timelineSlider.value = '100';
+    updateTimelineDisplay(lifetimeEndEpoch);
+    pauseTimeline();
+    return;
+  }
+  timelinePlaybackFrame = requestAnimationFrame(playTimelineFrame);
+}
+
+function setTimelineAnchor(anchor) {
+  const birthEpoch = Number(anchor?.birthEpoch);
+  if (!Number.isFinite(birthEpoch)) return;
+  pauseTimeline();
+  timelineRequestId += 1;
+  queuedTimelineEpoch = null;
+  lifetimeStartEpoch = birthEpoch;
+  const end = new Date(birthEpoch * 1000);
+  end.setUTCFullYear(end.getUTCFullYear() + 100);
+  lifetimeEndEpoch = end.getTime() / 1000;
+  timelineSlider.disabled = false;
+  timelineDateTime.disabled = false;
+  timelineBirthButton.disabled = false;
+  timelinePlayButton.disabled = false;
+  const current = Date.now() / 1000;
+  const initialEpoch = Math.min(lifetimeEndEpoch, Math.max(lifetimeStartEpoch, current));
+  updateTimelineDisplay(initialEpoch);
+  lifetimeTimelineActive = false;
+  if (Math.abs(initialEpoch - current) > 60) void showTimelineTransits(initialEpoch);
+  else timelineStatus.textContent = 'Current transits · use the slider to explore this 100-year timeline.';
+}
+
+timelineSlider.addEventListener('input', () => selectTimelineEpoch(timelineEpochAtAge(Number(timelineSlider.value))));
+timelineSlider.addEventListener('pointerdown', pauseTimeline);
+timelineSlider.addEventListener('keydown', event => {
+  if (['ArrowLeft', 'ArrowRight', 'Home', 'End', 'PageDown', 'PageUp'].includes(event.key)) pauseTimeline();
+});
+timelineDateTime.addEventListener('change', () => {
+  pauseTimeline();
+  const epoch = new Date(timelineDateTime.value).getTime() / 1000;
+  if (Number.isFinite(epoch)) selectTimelineEpoch(epoch, true);
+});
+timelineBirthButton.addEventListener('click', () => {
+  pauseTimeline();
+  selectTimelineEpoch(lifetimeStartEpoch, true);
+});
+timelineNowButton.addEventListener('click', () => {
+  pauseTimeline();
+  timelineRequestId += 1;
+  queuedTimelineEpoch = null;
+  lifetimeTimelineActive = false;
+  const now = Date.now() / 1000;
+  updateTimelineDisplay(now);
+  timelineStatus.textContent = 'Refreshing current transit data…';
+  void refreshTransits();
+});
+timelinePlayButton.addEventListener('click', () => {
+  if (timelinePlaybackFrame != null) {
+    pauseTimeline();
+    return;
+  }
+  let age = Number(timelineSlider.value);
+  if (age >= 100) {
+    age = 0;
+    updateTimelineDisplay(lifetimeStartEpoch);
+    void showTimelineTransits(lifetimeStartEpoch);
+  }
+  timelinePlaybackAge = age;
+  timelinePlaybackMonth = Math.floor(age * 12);
+  timelinePlaybackStart = null;
+  lifetimeTimelineActive = true;
+  timelinePlayButton.textContent = 'Pause';
+  timelinePlayButton.setAttribute('aria-pressed', 'true');
+  timelinePlaybackFrame = requestAnimationFrame(playTimelineFrame);
+});
+window.addEventListener('castalia-timeline-anchor-updated', event => setTimelineAnchor(event.detail));
+if (window.hdTimelineAnchor) setTimelineAnchor(window.hdTimelineAnchor);
 
 function resize() {
   const rect = canvas.getBoundingClientRect();

@@ -1,4 +1,4 @@
-import { generatePublicDemoReading } from './public-demo-readings.js?v=family-opportunities-20261020';
+import { generatePublicDemoReading } from './public-demo-readings.js?v=lifetime-timeline-20261020';
 import { publicPairRecurrence, publicFamilyRecurrence } from './relationship-recurrence-data.js?v=family-opportunities-20261020';
 
 const config = window.castaliaConfig || {};
@@ -17,7 +17,7 @@ let signedIn = false;
 let firstReadingStarted = false;
 let channelDefinitions;
 
-const readingInstruction = `You are the Castalia Astrolabe Human Design chart reader. Interpret supplied natal gates and current Human Design transits in clear, grounded language. When discussing transits, prioritize channels that are temporarily completed or bridged in a chart or relationship, and explain that the channel will no longer be completed by that transit when its contributing gate moves on. Give the channel's estimated active window using the supplied next-gate-exit estimates. Mention an individual gate only when it helps explain a channel completion; do not list transit gates that create no channel change. Use the supplied BodyGraph channel guide. The supplied ephemeris and exit estimates are factual sources of truth, based on 15-minute samples and not guarantees. If no exit is available in the window, say the end time is unknown. If lifetime recurrence statistics are supplied, use them as retrospective six-hour-sampled model estimates for this specific pair or family. Distinguish episode counts, share of sampled time, and sampled duration; median estimates have roughly six-hour resolution. A recurrence sample date identifies the historical configuration counted: do not call it current unless it matches the transit snapshot date. Call attention to a configuration that occurred only once or among the least frequent modeled returns, state its count and sampled window, and call it unusual only within this family's modeled timeline. Never imply population uniqueness or rarity. For a current transit bridge, connect its channel theme to one optional, practical way the people could explore that energy together while the supplied window lasts; use the channel guide and actual exit estimate, and present this as an invitation, not a promised effect or required action. Do not invent an opportunity unrelated to the supplied gates and channels. Separate natal activations from temporary transits. When reading multiple charts, weave defined and undefined centers into a relational interpretation: describe consistent patterns, sensitivity to context, shared definition, and what complementary channels add. Avoid reducing people to a checklist. Explain Human Design as a reflective framework, never as a scientific finding, diagnosis, or prediction. Do not invent chart facts, transit dates, certainty, or personality traits. Answer directly in specific, warm, readable prose.`;
+const readingInstruction = `You are the Castalia Astrolabe Human Design chart reader. Interpret supplied natal gates and transit activations in clear, grounded language. When lifetimeTimeline is true, the snapshot is for the selected historical or future date and time; describe it as “at the selected time,” never as current or today. When discussing transits, prioritize channels that are temporarily completed or bridged in a chart or relationship, and explain that the channel will no longer be completed by that transit when its contributing gate moves on. Give an estimated active window only when a next-gate-exit estimate is supplied. Mention an individual gate only when it helps explain a channel completion; do not list transit gates that create no channel change. Use the supplied BodyGraph channel guide. The supplied ephemeris and exit estimates are factual sources of truth, based on 15-minute samples, and are not guarantees. If no exit is available, say the end estimate is unavailable; do not invent a window. If lifetime recurrence statistics are supplied, use them as retrospective six-hour-sampled model estimates for this specific pair or family. Distinguish episode counts, share of sampled time, and sampled duration; median estimates have roughly six-hour resolution. A recurrence sample date identifies the historical configuration counted: do not call it current unless it matches the transit snapshot date. Call attention to a configuration that occurred only once or among the least frequent modeled returns, state its count and sampled window, and call it unusual only within this family's modeled timeline. Never imply population uniqueness or rarity. For a transit bridge, connect its channel theme to one optional, practical way the people could explore that energy together; if an estimated window is supplied, use it to time-bound the invitation. Do not invent an opportunity unrelated to the supplied gates and channels. Separate natal activations from temporary transits. When reading multiple charts, weave defined and undefined centers into a relational interpretation: describe consistent patterns, sensitivity to context, shared definition, and what complementary channels add. Avoid reducing people to a checklist. Explain Human Design as a reflective framework, never as a scientific finding, diagnosis, or prediction. Do not invent chart facts, transit dates, certainty, or personality traits. Answer directly in specific, warm, readable prose.`;
 
 function addMessage(role, text, extraClass = '') {
   const node = document.createElement('div');
@@ -77,14 +77,14 @@ async function getChannelDefinitions() {
   return channelDefinitions;
 }
 
-function activeChannels(definitions, natalGates, transitGates) {
+function activeChannels(definitions, natalGates, transitGates, transitLabel = 'current transit') {
   const active = new Set([...natalGates, ...transitGates]);
   return definitions.filter(({ from, to }) => active.has(from) && active.has(to))
     .map(({ id, from, to, reading }) => ({
       channel: id,
       from: `${from} (${natalGates.has(from) ? 'natal' : 'transit'})`,
       to: `${to} (${natalGates.has(to) ? 'natal' : 'transit'})`,
-      type: natalGates.has(from) && natalGates.has(to) ? 'natal' : 'completed by current transit',
+      type: natalGates.has(from) && natalGates.has(to) ? 'natal' : `completed by ${transitLabel}`,
       chartGuide: reading
     }));
 }
@@ -159,10 +159,14 @@ function remainingLabel(snapshotEpoch, exitsAt) {
 async function buildChartContext() {
   await waitForNatalProfiles();
   const transit = window.CastaliaHumanDesignTransit;
-  if (!transit?.currentSnapshot || !transit?.estimateDurations) throw new Error('The transit ephemeris is still loading. Try again in a moment.');
-  const snapshot = await transit.currentSnapshot();
+  const timelineView = window.hdCurrentReadingView;
+  const lifetimeTimeline = Boolean(timelineView?.lifetimeTimeline && Number.isFinite(timelineView.transitEpoch));
+  if (!transit?.currentSnapshot || !transit?.snapshotAt || !transit?.estimateDurations) throw new Error('The transit ephemeris is still loading. Try again in a moment.');
+  const snapshot = lifetimeTimeline
+    ? await transit.snapshotAt(new Date(timelineView.transitEpoch))
+    : await transit.currentSnapshot();
   const [durations, definitions] = await Promise.all([
-    transit.estimateDurations(snapshot),
+    lifetimeTimeline ? Promise.resolve([]) : transit.estimateDurations(snapshot),
     getChannelDefinitions()
   ]);
   const danielGates = parseGates('#danielGates');
@@ -180,7 +184,7 @@ async function buildChartContext() {
       id: child.id,
       name: child.name || child.id || 'Child chart',
       natalGates: [...gates].sort((a, b) => a - b),
-      currentlyActiveChannels: activeChannels(definitions, gates, transitGates),
+      currentlyActiveChannels: activeChannels(definitions, gates, transitGates, lifetimeTimeline ? 'transit at the selected time' : 'current transit'),
       transitChannelChanges: transitChannelChanges(definitions, gates, snapshot, durationByPlanet)
     };
   });
@@ -188,13 +192,13 @@ async function buildChartContext() {
     blue: {
       name: window.hdChartNames?.daniel || document.querySelector('#chartNameA')?.textContent || 'Blue chart',
       natalGates: [...danielGates].sort((a, b) => a - b),
-      currentlyActiveChannels: activeChannels(definitions, danielGates, transitGates),
+      currentlyActiveChannels: activeChannels(definitions, danielGates, transitGates, lifetimeTimeline ? 'transit at the selected time' : 'current transit'),
       transitChannelChanges: transitChannelChanges(definitions, danielGates, snapshot, durationByPlanet)
     },
     pink: {
       name: window.hdChartNames?.camille || document.querySelector('#chartNameB')?.textContent || 'Pink chart',
       natalGates: [...camilleGates].sort((a, b) => a - b),
-      currentlyActiveChannels: activeChannels(definitions, camilleGates, transitGates),
+      currentlyActiveChannels: activeChannels(definitions, camilleGates, transitGates, lifetimeTimeline ? 'transit at the selected time' : 'current transit'),
       transitChannelChanges: transitChannelChanges(definitions, camilleGates, snapshot, durationByPlanet)
     }
   };
@@ -220,6 +224,7 @@ async function buildChartContext() {
   return {
     asOf: snapshot.timestamp,
     asOfLocal: new Date(snapshot.epoch * 1000).toLocaleString(),
+    lifetimeTimeline,
     timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
     ephemeris: `${snapshot.source}; ${snapshot.sampleStepSeconds / 60}-minute samples; tropical ecliptic`,
     transitGateActivations: Object.entries(snapshot.gatePlanets).map(([gate, planets]) => ({
@@ -259,10 +264,10 @@ async function waitForNatalProfiles() {
 function composeUserMessage(question, context, firstReading) {
   const prior = conversation.slice(-8).map(turn => `${turn.role === 'user' ? 'User' : 'Reader'}: ${turn.text}`).join('\n');
   const prompt = firstReading
-    ? 'Give me a warm, specific reading of this example family BodyGraph. Start with the parent dynamic, then describe each child in relation to the family using the supplied family connections. Separate natal patterns from current transits. Focus the transit portion on channels temporarily completed in each chart or relationship, and explain when they are expected to stop completing as their transit gates move on. Include estimated local time bounds where available. Use lifetime recurrence data to call attention to a genuinely distinctive configuration within this family’s modeled timeline, giving its count and sample date; do not call it unique or rare in the population. For a current temporary bridge, connect its channel theme to one practical, low-pressure activity the people could try together before the estimated window closes. Keep the activity optional and time-bounded, and never imply a guaranteed outcome. Mention a transit gate only to explain a channel change; do not list all active gates. Keep it grounded in supplied gates, recurrence statistics, and channel descriptions; do not infer unsupported traits.'
+    ? `Give me a warm, specific reading of this example family BodyGraph. Start with the parent dynamic, then describe each child in relation to the family using the supplied family connections. Separate natal patterns from ${context.lifetimeTimeline ? 'transits at the selected time' : 'current transits'}. Focus the transit portion on channels temporarily completed in each chart or relationship, and explain when they are expected to stop completing as their transit gates move on. Include estimated local time bounds only where supplied. Use lifetime recurrence data to call attention to a genuinely distinctive configuration within this family’s modeled timeline when its sample date matches the snapshot; give its count and sample date, and do not call it unique or rare in the population. For a temporary bridge, connect its channel theme to one practical, low-pressure activity the people could try together; time-bound it only if an estimated window is supplied. Keep the activity optional and never imply a guaranteed outcome. Mention a transit gate only to explain a channel change; do not list all active gates. Keep it grounded in supplied gates, recurrence statistics, and channel descriptions; do not infer unsupported traits.`
     : question;
   return [
-    'Verified chart and current transit context (JSON facts):',
+    'Verified chart and selected-time/current transit context (JSON facts):',
     JSON.stringify(context),
     prior ? `Recent conversation:\n${prior}` : '',
     `User ${firstReading ? 'request' : 'question'}: ${prompt}`
@@ -274,7 +279,7 @@ async function requestReading(question, firstReading = false) {
   if (!signedIn && !publicExampleReading) return;
   if (!firstReading && !question.trim()) return;
   if (firstReading) firstReadingStarted = true;
-  const loading = addMessage('assistant', firstReading ? 'Generating the family chart reading…' : 'Checking the chart and current transits…');
+  const loading = addMessage('assistant', firstReading ? 'Generating the family chart reading…' : 'Checking the chart and selected-time transits…');
   sendButton.disabled = true;
   questionBox.disabled = true;
   try {
@@ -344,11 +349,11 @@ async function generateFrontViewReading(view) {
   if (!token) throw new Error('Your Castalia session expired. Sign in again to continue.');
   const context = await buildChartContext();
   const userMessage = [
-    'Verified family chart, channel guide, and current transit context (JSON facts):',
+    'Verified family chart, channel guide, and selected-time/current transit context (JSON facts):',
     JSON.stringify(context),
     'Current camera view (JSON facts):',
     JSON.stringify(view),
-    'Write a concise, fluent reading for this exact view. Begin with a specific individual interpretation of the front-facing chart that connects type, strategy, authority, profile, defined/undefined centers, and natal channels into a coherent picture. Then give the three family relationship interpretations listed in the relationships array, one for each other family member, regardless of their geometric position in the scene. Explain energy exchange through centers, shared definition, and complementary channels. Call out a distinctive configuration when recurrence statistics support it, with the sample date and family-specific count. Do not mention whether charts overlap, align, or are visible together. End with a short transit note only when current transits affect the front chart or one of these relationships. Prioritize channels the transits temporarily complete and say when each is expected to stop completing as its gate moves on; include local time bounds. Where useful, suggest one optional, realistic activity connected to a current relationship channel that the people could try during its estimated window. Mention a transit gate only to explain a channel change, and omit gates that create no channel change. Prefer practical reflection and specific evidence over generic praise or lists. Do not repeat every gate, center, or transit. Write 4–6 compact paragraphs, without tables or a compatibility verdict.'
+    `Write a concise, fluent reading for this exact view. Begin with a specific individual interpretation of the front-facing chart that connects type, strategy, authority, profile, defined/undefined centers, and natal channels into a coherent picture. Then give the three family relationship interpretations listed in the relationships array, one for each other family member, regardless of their geometric position in the scene. Explain energy exchange through centers, shared definition, and complementary channels. Call out a distinctive configuration when recurrence statistics support it, with the sample date and family-specific count. Do not mention whether charts overlap, align, or are visible together. End with a short transit note only when ${context.lifetimeTimeline ? 'transits at the selected date and time' : 'current transits'} affect the front chart or one of these relationships. Prioritize channels the transits temporarily complete. Give transit end times only where estimates are supplied; never infer a duration from a single snapshot. Where useful, suggest one optional, realistic activity connected to a relationship channel. Mention a transit gate only to explain a channel change, and omit gates that create no channel change. Prefer practical reflection and specific evidence over generic praise or lists. Do not repeat every gate, center, or transit. Write 4–6 compact paragraphs, without tables or a compatibility verdict.`
   ].join('\n\n');
   const response = await fetch(`${String(config.supabaseUrl).replace(/\/+$/, '')}/functions/v1/voice-pipeline`, {
     method: 'POST',

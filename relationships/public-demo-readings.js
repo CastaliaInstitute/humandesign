@@ -60,7 +60,9 @@ export function generatePublicDemoReading(view) {
       else paragraphs.push(`${pair.people?.join(' and ') || 'These family members'} are together in this view. Notice what feels familiar between them and where they may have different timing or ways of communicating. The chart details below offer one lens; simple check-ins and direct conversation are more useful than assuming what someone else is feeling.`);
       const recurrence = pair.transitChannelRecurrence;
       const recurrenceNotes = [];
-      if (recurrence?.currentState) {
+      const sameRecurrenceSample = recurrence?.sampleDate && Number.isFinite(view.transitEpoch)
+        && Math.abs(new Date(recurrence.sampleDate).getTime() - view.transitEpoch) <= recurrence.scanStepHours * 3600000;
+      if (recurrence?.currentState && (!view.lifetimeTimeline || sameRecurrenceSample)) {
         const stateDuration = recurrence.currentState;
         const median = stateDuration.median_days <= 0.5 ? 'about 12 hours' : `about ${stateDuration.median_days} days`;
         const longest = stateDuration.longest_days < 1 ? `${Math.round(stateDuration.longest_days * 24)} hours` : `${stateDuration.longest_days} days`;
@@ -83,7 +85,7 @@ export function generatePublicDemoReading(view) {
         const rank = item.relativeFrequencyRank && item.comparisonCount
           ? `Ranks ${item.relativeFrequencyRank} of ${item.comparisonCount} possible bridge channels by modeled occupancy for this pair`
           : '';
-        const windowNote = item.expectedThrough ? `Current transit window: ${item.expectedThrough}` : '';
+        const windowNote = item.expectedThrough ? `${view.lifetimeTimeline ? 'Selected-time transit window' : 'Current transit window'}: ${item.expectedThrough}` : '';
         const opportunity = channelOpportunities[item.channel]
           ? `One optional way to explore its theme during this temporary bridge is to ${channelOpportunities[item.channel]}`
           : item.channelDescription
@@ -95,7 +97,7 @@ export function generatePublicDemoReading(view) {
           windowNote,
           opportunity
         ].filter(Boolean);
-        recurrenceNotes.push(`Of the current transit bridges, ${channelNotes.join('. ')}`);
+        recurrenceNotes.push(`Among the ${view.lifetimeTimeline ? 'selected-time' : 'current'} transit bridges, ${channelNotes.join('. ')}`);
       }
       if (recurrenceNotes.length) paragraphs.push(`${recurrenceNotes.join('. ')}. Based on six-hour samples for this pair, these are modeled recurrence estimates, not population rarity or a forecast of current transit duration.`);
     }
@@ -106,14 +108,18 @@ export function generatePublicDemoReading(view) {
   const familyStats = view.familyRecurrence || publicFamilyRecurrence(familyCharts);
   if (familyStats) {
     const span = `${new Date(familyStats.span[0]).getUTCFullYear()}–${new Date(familyStats.span[1]).getUTCFullYear()}`;
-    const currentDuration = familyStats.currentStateDuration?.median_days <= 0.5
-      ? 'about 12 hours at the scan’s resolution'
-      : `about ${familyStats.currentStateDuration.median_days} days at the scan’s resolution`;
-    const sampleDate = new Date(familyStats.sampleDate).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric', timeZone: 'UTC' });
-    const configurationNote = familyStats.currentStateEpisodes === 1
-      ? 'This is a standout configuration within the family’s modeled timeline, not a claim that the family is unique in the population.'
-      : `The scan found ${familyStats.currentStateEpisodes} sampled episodes of this configuration; this is a family-specific model comparison, not a population ranking.`;
-    paragraphs.push(`Across the family’s modeled shared-lifetime window (${span}), the six-hour scan found ${familyStats.uniqueStates.toLocaleString()} different combined relationship states. The full-family combination sampled on ${sampleDate} occurred in ${familyStats.currentStateEpisodes} episode${familyStats.currentStateEpisodes === 1 ? '' : 's'} at this resolution, lasting ${currentDuration}. ${configurationNote}`);
+    if (view.lifetimeTimeline) {
+      paragraphs.push(`Across the family’s modeled shared-lifetime window (${span}), the six-hour scan found ${familyStats.uniqueStates.toLocaleString()} different combined relationship states. The selected date above is recalculated from the ephemeris and is not matched to a recurrence sample.`);
+    } else {
+      const currentDuration = familyStats.currentStateDuration?.median_days <= 0.5
+        ? 'about 12 hours at the scan’s resolution'
+        : `about ${familyStats.currentStateDuration.median_days} days at the scan’s resolution`;
+      const sampleDate = new Date(familyStats.sampleDate).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric', timeZone: 'UTC' });
+      const configurationNote = familyStats.currentStateEpisodes === 1
+        ? 'This is a standout configuration within the family’s modeled timeline, not a claim that the family is unique in the population.'
+        : `The scan found ${familyStats.currentStateEpisodes} sampled episodes of this configuration; this is a family-specific model comparison, not a population ranking.`;
+      paragraphs.push(`Across the family’s modeled shared-lifetime window (${span}), the six-hour scan found ${familyStats.uniqueStates.toLocaleString()} different combined relationship states. The full-family combination sampled on ${sampleDate} occurred in ${familyStats.currentStateEpisodes} episode${familyStats.currentStateEpisodes === 1 ? '' : 's'} at this resolution, lasting ${currentDuration}. ${configurationNote}`);
+    }
   }
   if (view.transitsShown) {
     const changes = front.transitChannelChanges || [];
@@ -123,9 +129,9 @@ export function generatePublicDemoReading(view) {
         const windows = item.transitGates.map(gate => `Gate ${gate.gate}, ${gate.planets}, ${gate.expectedThrough}`).join(' and ');
         return `${item.channel}${name} is temporarily completed while ${windows}; when the transit gate moves on, this channel will no longer be completed by the transit`;
       });
-      paragraphs.push(`Current transits are most noticeable where they temporarily complete a channel in ${front.name || 'the chart'}: ${channelNotes.join('; ')}. These are time-limited additions to the natal pattern.`);
+      paragraphs.push(`${view.lifetimeTimeline ? 'At the selected time' : 'Current transits'} are most noticeable where they temporarily complete a channel in ${front.name || 'the chart'}: ${channelNotes.join('; ')}. These are time-limited additions to the natal pattern.`);
     } else {
-      paragraphs.push(`The current transits do not complete a new channel in ${front.name || 'the chart'}, so there is no temporary channel change to highlight right now. Transit gates that do not complete a channel are left out of this reading.`);
+      paragraphs.push(`${view.lifetimeTimeline ? 'At the selected time, transits' : 'The current transits'} do not complete a new channel in ${front.name || 'the chart'}, so there is no temporary channel change to highlight. Transit gates that do not complete a channel are left out of this reading.`);
     }
   }
   return paragraphs.join('\n\n');
