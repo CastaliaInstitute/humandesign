@@ -198,7 +198,21 @@ function describePathFeature(node, person) {
     const [label, meaning] = centerDescriptions[centerId] || [centerId.replace(/\b\w/g, letter => letter.toUpperCase()), 'A Human Design energy center.'];
     const defined = center.dataset.defined === 'true';
     const key = `${person}:center:${label}`;
-    return hoverInfo(key, `${label} center`, `${meaning} ${owner} · ${defined ? 'defined' : 'undefined'}.`);
+    const doc = center.ownerDocument || sourceDocument;
+    let summary = '';
+    if (defined && doc) {
+      const activeGates = new Set(parseGateList(person === 'daniel' ? '#danielGates' : '#camilleGates'));
+      const centerGates = [...doc.querySelectorAll(`.gate[data-center="${centerId}"]`)].map(gate => +gate.dataset.gate).filter(Number.isFinite);
+      const activeCenterGates = centerGates.filter(gate => activeGates.has(gate));
+      const definedChannels = [...doc.querySelectorAll('.channel-group[data-from][data-to]')]
+        .filter(channel => channel.getAttribute('data-defined') === 'true' && (activeCenterGates.includes(+channel.dataset.from) || activeCenterGates.includes(+channel.dataset.to)))
+        .map(channel => `${Math.min(+channel.dataset.from, +channel.dataset.to)}–${Math.max(+channel.dataset.from, +channel.dataset.to)}`);
+      const parts = [];
+      if (activeCenterGates.length) parts.push(`gates ${activeCenterGates.join(', ')}`);
+      if (definedChannels.length) parts.push(`channels ${definedChannels.join(', ')}`);
+      if (parts.length) summary = ` Defined as: ${parts.join(' and ')}.`;
+    }
+    return hoverInfo(key, `${label} center`, `${meaning} ${owner} · ${defined ? 'defined' : 'undefined'}.${summary}`);
   }
   return null;
 }
