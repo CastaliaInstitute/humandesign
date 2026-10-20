@@ -81,7 +81,7 @@ let autoRotate = !reduceMotion;
 const autoRotateSpeed = 0.035; // radians per second; one slow turn takes about three minutes
 const colors = { daniel: new THREE.Color('#087fa5'), camille: new THREE.Color('#cf4f79') };
 const childPalette = ['#488f73', '#b67a37', '#7864a6', '#518a9d'].map(color => new THREE.Color(color));
-const familyLayout = { parentScale: parentChartScale, childScale: parentChartScale, parentRadius: 0 };
+const familyLayout = { parentScale: parentChartScale, childScale: parentChartScale, parentRadius: 50 };
 function childPlaneRadius() {
   return Number(document.querySelector('#separation').value) / 2;
 }
@@ -224,6 +224,15 @@ function frontFamilyReading() {
   profileLine.textContent = `Across the family, ${profiles.join('; ')}.`;
   root.append(profileLine);
 
+  const visiblePairs = overlappingChartPairs();
+  const alignment = document.createElement('p');
+  if (visiblePairs.length) {
+    alignment.textContent = `Aligned charts: ${visiblePairs.map(pair => pair.map(personName).join(' and ')).join('; ')}.`;
+  } else {
+    alignment.textContent = 'No charts are exactly aligned at this angle. Rotate by 45° to compare the next pair.';
+  }
+  root.append(alignment);
+
   const centerNames = summary.definedCenters.map(center => centerDescriptions[center]?.[0] || center);
   const intro = document.createElement('p');
   const channelNames = summary.definedChannels.map(id => {
@@ -269,7 +278,6 @@ function frontFamilyReading() {
     root.append(transitSection);
   }
 
-  const visiblePairs = overlappingChartPairs();
   for (const [personA, personB] of visiblePairs) {
     const gatesA = gates.get(personA) || gatesFor(personA), gatesB = gates.get(personB) || gatesFor(personB);
     const nameA = personName(personA), nameB = personName(personB);
@@ -770,13 +778,13 @@ function chartPointInFamily(point, person, localDepth = 0) {
     centerZ = childPlaneRadius() * Math.sin(childAngle);
     childRotation = Math.atan2(-centerX, -centerZ);
   } else {
-    centerY = person === 'daniel' ? familyLayout.parentRadius : -familyLayout.parentRadius;
+    centerZ = person === frontPerson ? familyLayout.parentRadius : -familyLayout.parentRadius;
   }
   const flipX = isChild && childIndex % 2 === 1;
   const localX = flipX ? 194.4 * scale - point.x * scale : point.x * scale - 194.4 * scale;
   const localY = -point.y * scale + chartViewHeight * scale + centerY;
   const localZ = localDepth * scale;
-  if (isChild) {
+  if (isChild || childRotation) {
     return new THREE.Vector3(
       centerX + Math.cos(childRotation) * localX + Math.sin(childRotation) * localZ,
       localY,
@@ -1046,10 +1054,10 @@ function rebuildRelationship() {
     const data = loader.parse(extractLayer(sourceDocument, person, natalGates[person]));
     chartData[person] = data;
     releaseGroup(planeGroups[person]);
-    const centerY = person === 'daniel' ? familyLayout.parentRadius : -familyLayout.parentRadius;
     const group = makePlaneGroup(data.paths, person, sharedChannels, relationshipChannels, {
-      scale: familyLayout.parentScale, offsetY: centerY
+      scale: familyLayout.parentScale
     });
+    group.position.z = person === frontPerson ? familyLayout.parentRadius : -familyLayout.parentRadius;
     planeGroups[person] = group;
     chartRoot.add(group);
   }
@@ -1059,7 +1067,9 @@ function rebuildRelationship() {
   }
   const separation = Number(document.querySelector('#separation').value);
   const half = separation / 2;
-  planeGroups.daniel.position.z = frontPerson === 'daniel' ? half : -half;
+  // Keep the parent pair's shared center at the same radius as the children.
+  familyLayout.parentRadius = half;
+  planeGroups.daniel.position.z = frontPerson === 'daniel' ? familyLayout.parentRadius : -familyLayout.parentRadius;
   planeGroups.camille.position.z = -planeGroups.daniel.position.z;
   document.querySelector('#separationValue').value = String(separation);
   for (const [person, group] of Object.entries(transitGroups)) {
@@ -1072,9 +1082,8 @@ function rebuildRelationship() {
       const activations = new Set([...natalGates, ...activeTransitSnapshot.gates]);
       const transitData = loader.parse(extractLayer(sourceDocument, person, activations));
       const group = makeTransitGroup(transitData, activeTransitSnapshot, natalGates, person);
-      const centerY = person === 'daniel' ? familyLayout.parentRadius : -familyLayout.parentRadius;
       group.scale.set(familyLayout.parentScale, -familyLayout.parentScale, familyLayout.parentScale);
-      group.position.set(-194.4 * familyLayout.parentScale, chartViewHeight * familyLayout.parentScale + centerY, 0);
+      group.position.set(-194.4 * familyLayout.parentScale, chartViewHeight * familyLayout.parentScale, 0);
       group.position.z = planeGroups[person].position.z;
       transitGroups[person] = group;
       chartRoot.add(group);
@@ -1174,6 +1183,7 @@ function resize() {
 }
 function setSeparation(value) {
   const half = Number(value) / 2;
+  familyLayout.parentRadius = half;
   if (planeGroups.daniel) planeGroups.daniel.position.z = frontPerson === 'daniel' ? half : -half;
   if (planeGroups.camille) planeGroups.camille.position.z = -planeGroups.daniel.position.z;
   document.querySelector('#separationValue').value = String(value);
@@ -1400,7 +1410,7 @@ window.addEventListener('keydown', event => {
   if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
   pauseAutoRotate();
   event.preventDefault();
-  const step = (event.shiftKey ? 0.28 : 0.1) * (event.key === 'ArrowLeft' ? 1 : -1);
+  const step = (event.altKey ? Math.PI / 4 : event.shiftKey ? 0.28 : 0.1) * (event.key === 'ArrowLeft' ? 1 : -1);
   rotateFamily(step);
 });
 window.addEventListener('resize', resize);
