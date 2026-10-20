@@ -131,6 +131,36 @@ function tubeFromPoints(points, radius, material, z) {
   mesh.userData.svgPart = true;
   return mesh;
 }
+function dashedTubesFromPoints(points, radius, material, z, dashLength = 7, gapLength = 4) {
+  if (points.length < 2) return [];
+  const lengths = [0];
+  for (let i = 1; i < points.length; i++) {
+    lengths.push(lengths[i - 1] + Math.hypot(points[i].x - points[i - 1].x, points[i].y - points[i - 1].y));
+  }
+  const total = lengths[lengths.length - 1];
+  const pointAt = distance => {
+    let index = 1;
+    while (index < lengths.length - 1 && lengths[index] < distance) index++;
+    const span = lengths[index] - lengths[index - 1] || 1;
+    const t = (distance - lengths[index - 1]) / span;
+    return {
+      x: THREE.MathUtils.lerp(points[index - 1].x, points[index].x, t),
+      y: THREE.MathUtils.lerp(points[index - 1].y, points[index].y, t)
+    };
+  };
+  const meshes = [];
+  for (let start = 0; start < total; start += dashLength + gapLength) {
+    const end = Math.min(start + dashLength, total);
+    const segment = [pointAt(start)];
+    for (let distance = start + 1.5; distance < end; distance += 1.5) segment.push(pointAt(distance));
+    segment.push(pointAt(end));
+    const curve = new THREE.CatmullRomCurve3(segment.map(point => new THREE.Vector3(point.x, point.y, z)), false, 'centripetal');
+    const mesh = new THREE.Mesh(new THREE.TubeGeometry(curve, Math.max(4, segment.length * 2), radius, 5, false), material);
+    mesh.userData.svgPart = true;
+    meshes.push(mesh);
+  }
+  return meshes;
+}
 function addFlowMotion(target, curve, color, hover = null, reverse = false) {
   if (reduceMotion || !curve) return;
   const bead = new THREE.Group();
@@ -502,7 +532,7 @@ function makeTransitGroup(data, snapshot, natalGates, person) {
   const activeGates = new Set([...natalGates, ...transitGates]);
   const gatePoints = getGatePoints(data.paths);
   const transitColor = new THREE.Color('#7c3aed');
-  const roadMaterial = lineMaterial(transitColor, 0.96);
+  const roadMaterial = lineMaterial(colors[person], 0.96);
   const ringMaterial = new THREE.MeshBasicMaterial({ color: transitColor, transparent: true, opacity: 0.98, side: THREE.DoubleSide, depthWrite: false, toneMapped: false });
   for (const path of data.paths) {
     const node = path.userData.node;
@@ -526,10 +556,12 @@ function makeTransitGroup(data, snapshot, natalGates, person) {
       `${reading?.description || 'The channel between these gates is temporarily activated.'} This channel is completed in ${owner}'s chart by ${gateSource(from)} and ${gateSource(to)}. Temporary transit overlay · ${snapshot.source}.`
     );
     const points = path.subPaths[0].getPoints(48);
-    const road = tubeFromPoints(points, 1.35, roadMaterial, 4.5);
-    if (road) { Object.assign(road.userData, hover); group.add(road); }
-    const flowCurve = new THREE.CatmullRomCurve3(points.map(point => new THREE.Vector3(point.x, point.y, 5.2)), false, 'centripetal');
-    addFlowMotion(group, flowCurve, '#c4b5fd', hover);
+    for (const dash of dashedTubesFromPoints(points, 1.35, roadMaterial, 2.85)) {
+      Object.assign(dash.userData, hover);
+      group.add(dash);
+    }
+    const flowCurve = new THREE.CatmullRomCurve3(points.map(point => new THREE.Vector3(point.x, point.y, 3.55)), false, 'centripetal');
+    addFlowMotion(group, flowCurve, colors[person].getStyle(), hover);
   }
   for (const gate of transitGates) {
     const point = gatePoints.get(gate);
@@ -596,7 +628,7 @@ function rebuildRelationship() {
       const activations = new Set([...natalGates, ...transitSnapshot.gates]);
       const transitData = loader.parse(extractLayer(sourceDocument, person, activations));
       const group = makeTransitGroup(transitData, transitSnapshot, natalGates, person);
-      group.position.z = planeGroups[person].position.z + 1.8;
+      group.position.z = planeGroups[person].position.z;
       transitGroups[person] = group;
       chartRoot.add(group);
       group.visible = transitToggle.checked;
