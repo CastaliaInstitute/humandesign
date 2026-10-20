@@ -76,6 +76,7 @@ function summarizeChart(gates, activations) {
     .map(gate => [+gate.dataset.gate, gate.dataset.center]));
   const adjacent = new Map();
   const definedCenters = new Set();
+  const definedChannels = [];
   const connect = (a, b) => {
     if (!adjacent.has(a)) adjacent.set(a, new Set());
     if (!adjacent.has(b)) adjacent.set(b, new Set());
@@ -85,6 +86,7 @@ function summarizeChart(gates, activations) {
   for (const channel of template.querySelectorAll('.channel-group[data-from][data-to]')) {
     const from = +channel.dataset.from, to = +channel.dataset.to;
     if (!gates.has(from) || !gates.has(to)) continue;
+    definedChannels.push(`${Math.min(from, to)}-${Math.max(from, to)}`);
     const fromCenter = gateCenters.get(from), toCenter = gateCenters.get(to);
     if (fromCenter && toCenter) connect(fromCenter, toCenter);
   }
@@ -115,7 +117,60 @@ function summarizeChart(gates, activations) {
   const personalitySun = activations.find(item => item.type === 'personality' && item.planet === 'sun');
   const designSun = activations.find(item => item.type === 'design' && item.planet === 'sun');
   const profile = personalitySun && designSun ? `${personalitySun.line}/${designSun.line}` : '';
-  return { type, authority, profile, label: `${profile ? `${profile} · ` : ''}${authority} ${type}` };
+  return {
+    type, authority, profile, definedCenters: [...definedCenters], definedChannels,
+    label: `${profile ? `${profile} · ` : ''}${authority} ${type}`
+  };
+}
+function frontFamilyReading() {
+  const root = document.querySelector('#familyReadingBody');
+  if (!root || !sourceDocument) return;
+  root.replaceChildren();
+  const peers = [frontPerson === 'daniel' ? 'camille' : 'daniel', ...familyChildren.map(child => child.id)];
+  const gates = new Map([[frontPerson, gatesFor(frontPerson)]]);
+  for (const peer of peers) gates.set(peer, gatesFor(peer));
+  const activations = person => window.hdNatalPlanetaryActivations?.[person] || familyChildren.find(child => child.id === person)?.activations || [];
+  const personName = person => window.hdChartNames?.[person] || (person === 'daniel' ? 'Person 1' : person === 'camille' ? 'Person 2' : 'Child');
+  const frontName = personName(frontPerson);
+  const summary = summarizeChart(gates.get(frontPerson), activations(frontPerson));
+  const heading = document.querySelector('#familyReadingTitle');
+  if (heading) heading.textContent = `${frontName} in the family`;
+  if (!summary) return;
+
+  const centerNames = summary.definedCenters.map(center => centerDescriptions[center]?.[0] || center);
+  const intro = document.createElement('p');
+  intro.textContent = `${frontName} · ${summary.label}. ${summary.definedChannels.length} defined channels connect ${centerNames.length ? `${centerNames.length} centers (${centerNames.join(', ')})` : 'no centers'} in this chart.`;
+  root.append(intro);
+
+  const channels = [...sourceDocument.querySelectorAll('.person--daniel .channel-group[data-from][data-to]')].map(channel => {
+    const from = +channel.dataset.from, to = +channel.dataset.to;
+    const id = `${Math.min(from, to)}-${Math.max(from, to)}`;
+    return { id, from, to, label: id.replace('-', '–'), reading: relationshipChannelReadings[id] || channelDescriptions.get(id) };
+  });
+  for (const peer of peers) {
+    const frontGates = gates.get(frontPerson), peerGates = gates.get(peer);
+    const sharedGates = [...frontGates].filter(gate => peerGates.has(gate)).sort((a, b) => a - b);
+    const sharedChannels = channels.filter(channel => frontGates.has(channel.from) && frontGates.has(channel.to) && peerGates.has(channel.from) && peerGates.has(channel.to));
+    const complementary = channels.filter(channel => {
+      const frontHasFrom = frontGates.has(channel.from), frontHasTo = frontGates.has(channel.to);
+      const peerHasFrom = peerGates.has(channel.from), peerHasTo = peerGates.has(channel.to);
+      return (frontHasFrom && !frontHasTo && !peerHasFrom && peerHasTo) ||
+        (frontHasTo && !frontHasFrom && peerHasFrom && !peerHasTo);
+    });
+    const frontCompletePeerGate = channels.filter(channel => frontGates.has(channel.from) && frontGates.has(channel.to) && (peerGates.has(channel.from) !== peerGates.has(channel.to)));
+    const peerCompleteFrontGate = channels.filter(channel => peerGates.has(channel.from) && peerGates.has(channel.to) && (frontGates.has(channel.from) !== frontGates.has(channel.to)));
+    const item = document.createElement('p');
+    const facts = [`${sharedGates.length} shared gate${sharedGates.length === 1 ? '' : 's'}${sharedGates.length ? ` (${sharedGates.join(', ')})` : ''}`];
+    if (complementary.length) facts.push(`together complete ${complementary.map(channel => `${channel.label}${channel.reading?.name ? ` ${channel.reading.name}` : ''}`).join(', ')}`);
+    if (sharedChannels.length) facts.push(`both charts define ${sharedChannels.map(channel => channel.label).join(', ')}`);
+    if (frontCompletePeerGate.length) facts.push(`${peerName(peer)} has the other gate of ${frontCompletePeerGate.map(channel => channel.label).join(', ')}, already defined in ${frontName}'s chart`);
+    if (peerCompleteFrontGate.length) facts.push(`${frontName} has a gate in ${peerName(peer)}'s complete ${peerCompleteFrontGate.map(channel => channel.label).join(', ')}`);
+    item.textContent = `With ${peerName(peer)}: ${facts.join('; ')}.`;
+    root.append(item);
+  }
+  const note = document.createElement('small');
+  note.textContent = 'Natal chart comparison; current transits are excluded. This describes chart connections, not a compatibility verdict.';
+  root.append(note);
 }
 function makeSummaryLabel(person, gates, activations, color, x, y, z, scale = 1) {
   const summary = summarizeChart(gates, activations);
@@ -859,6 +914,7 @@ function rebuildRelationship() {
   });
   planeGroups.daniel.visible = document.querySelector('#showDaniel').checked;
   planeGroups.camille.visible = document.querySelector('#showCamille').checked;
+  frontFamilyReading();
   setStatus(`${relationshipGroup.userData.bridgeCount} relationship channel${relationshipGroup.userData.bridgeCount === 1 ? '' : 's'} shown.`);
 }
 
