@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import '../transit-data.js?family-circle-108-20261019';
-import { generatePublicDemoReading } from './public-demo-readings.js?v=public-demo-ai-readings-20261019';
+import { generatePublicDemoReading } from './public-demo-readings.js?v=family-opportunities-20261020';
+import { publicPairRecurrence, publicFamilyRecurrence } from './relationship-recurrence-data.js?v=family-opportunities-20261020';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { SVGLoader } from 'three/addons/loaders/SVGLoader.js';
 
@@ -418,12 +419,34 @@ function frontFamilyReading() {
       transitGates: chartTransits.map(gate => ({ gate, planets: transitPlanetNames(gate), expectedThrough: transitGateWindow(gate) }))
     };
   };
+  const transitGateSet = new Set(transitToggle.checked ? transitSnapshot?.gates || [] : []);
+  const activeTransitBridgeChannels = (personA, personB) => {
+    const gatesA = gates.get(personA) || new Set();
+    const gatesB = gates.get(personB) || new Set();
+    const natalGates = { [personA]: gatesA, [personB]: gatesB };
+    return [...sourceDocument.querySelectorAll('.person--daniel .channel-group[data-from][data-to]')].flatMap(node => {
+      const from = +node.dataset.from, to = +node.dataset.to;
+      const channel = `${Math.min(from, to)}-${Math.max(from, to)}`;
+      if ((gatesA.has(from) && gatesA.has(to)) || (gatesB.has(from) && gatesB.has(to))) return [];
+      const hasRelationshipBridge = relationshipLinkSpecs(from, to, personA, personB, natalGates, transitGateSet).length > 0;
+      const transitGates = [from, to].filter(gate => transitGateSet.has(gate) && !gatesA.has(gate) && !gatesB.has(gate));
+      if (!hasRelationshipBridge || !transitGates.length) return [];
+      const reading = relationshipChannelReadings[channel] || channelDescriptions.get(channel);
+      const expectedThrough = transitGates.map(gate => `Gate ${gate} ${transitGateWindow(gate)}`).join('; ');
+      return [{ channel, channelName: reading?.name || '', channelDescription: reading?.description || '', expectedThrough }];
+    });
+  };
   const viewContext = {
     frontPerson: chartFacts(readingPerson),
-    relationships: relationshipPairs.map(([a, b]) => ({ ids: [a, b], people: [personName(a), personName(b)], charts: [chartFacts(a), chartFacts(b)] })),
+    relationships: relationshipPairs.map(([a, b]) => {
+      const pair = { ids: [a, b], people: [personName(a), personName(b)], charts: [chartFacts(a), chartFacts(b)] };
+      pair.transitChannelRecurrence = publicPairRecurrence(pair, activeTransitBridgeChannels(a, b));
+      return pair;
+    }),
     transitsShown: Boolean(transitToggle.checked),
     transitAsOf: transitSnapshot ? new Date(transitSnapshot.epoch * 1000).toLocaleString() : null
   };
+  viewContext.familyRecurrence = publicFamilyRecurrence([viewContext.frontPerson, ...viewContext.relationships.map(pair => pair.charts[1])]);
   readingViewKey = JSON.stringify(viewContext);
   window.hdCurrentReadingView = viewContext;
 
@@ -998,11 +1021,20 @@ function extractLayer(doc, person, gates) {
   svg.querySelectorAll('.canvas').forEach(el => el.remove());
   svg.querySelectorAll('.person--daniel, .person--camille').forEach(el => { if (el !== keep) el.remove(); });
   keep.querySelectorAll('.gate').forEach(g => g.setAttribute('data-state', gates.has(+g.dataset.gate) ? 'closed' : 'open'));
-  keep.querySelectorAll('.channel-group').forEach(ch => ch.setAttribute('data-defined', String(gates.has(+ch.dataset.from) && gates.has(+ch.dataset.to))));
+  const definedCenters = new Set();
+  const gateCenters = new Map([...keep.querySelectorAll('.gate[data-gate][data-center]')].map(gate => [+gate.dataset.gate, gate.dataset.center]));
+  keep.querySelectorAll('.channel-group[data-from][data-to]').forEach(ch => {
+    const defined = gates.has(+ch.dataset.from) && gates.has(+ch.dataset.to);
+    ch.setAttribute('data-defined', String(defined));
+    if (defined) {
+      const fromCenter = gateCenters.get(+ch.dataset.from);
+      const toCenter = gateCenters.get(+ch.dataset.to);
+      if (fromCenter) definedCenters.add(fromCenter);
+      if (toCenter) definedCenters.add(toCenter);
+    }
+  });
   keep.querySelectorAll('.center').forEach(center => {
-    const id = center.dataset.center;
-    const active = [...keep.querySelectorAll(`.gate[data-center="${id}"]`)].some(g => gates.has(+g.dataset.gate));
-    center.setAttribute('data-defined', String(active));
+    center.setAttribute('data-defined', String(definedCenters.has(center.dataset.center)));
   });
   svg.querySelectorAll('script,#gate-state-legend,#flow-control,#flow-direction-legend,#svg-tooltip').forEach(el => el.remove());
   svg.setAttribute('viewBox', '0 0 360 360');

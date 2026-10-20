@@ -1,3 +1,5 @@
+import { publicFamilyRecurrence } from './relationship-recurrence-data.js?v=family-opportunities-20261020';
+
 const individualReadings = {
   daniel: `Daniel’s chart has a steady core in the G, Throat, Spleen, Sacral, and Root centers. In Human Design, these defined centers are described as more consistent ways of experiencing direction, expression, instinct, work energy, and pressure. The Head, Ajna, Ego, and Solar Plexus are undefined, which means those themes may be more changeable and sensitive to the people around him—not missing or weaker. In family life, he might notice himself picking up someone else’s urgency or certainty. A helpful pause is: “Is this pressure mine, and is this still a yes?” Once he has a genuine response, a quick heads-up can help everyone adjust to his pace. His chart links self-expression with action (10–34) and describes energy that can arrive in starts and stops (3–60).`,
   camille: `Camille’s G, Throat, Ego, and Sacral centers are defined in her chart; Human Design describes these as relatively consistent themes of direction, expression, will, and available work energy. Her Head, Ajna, Spleen, Solar Plexus, and Root are undefined, so questions, other people’s certainty, instinct, emotion, and urgency may feel different depending on the situation. That isn’t a lack: it can make it easier to notice what is happening around her, while a pause helps separate her own wants from the room’s pressure. Around plans, money, or chores, clear agreements can help. She might ask: “Do I have the energy for this, and do I want it?” Her chart highlights personal choice (10–34), stewardship (21–45), and finding a workable rhythm (5–15).`,
@@ -21,6 +23,21 @@ const publicNatalGates = {
   'child-2': [3,19,23,24,25,27,32,33,36,37,38,41,44,51,57,60,61,63]
 };
 
+const channelOpportunities = {
+  '4-63': 'pick one small question to explore together, compare possible answers, and test an idea in practice',
+  '12-22': 'choose an easy, low-pressure moment for honest conversation and let either person be quiet if that feels right',
+  '13-33': 'make room for one person to tell a story while the other listens, then allow time to reflect before sharing more',
+  '21-45': 'coordinate a modest household resource or responsibility with clear, mutual agreements',
+  '23-43': 'invite a fresh idea and ask whether the other person wants to hear it before working out how to explain it',
+  '25-51': 'try one small courageous thing together, keeping consent and each person’s comfort central',
+  '27-50': 'care for something together with clear roles so the responsibility feels shared',
+  '28-38': 'choose one meaningful, manageable challenge together without making difficulty the goal',
+  '35-36': 'try a manageable new experience together and leave room to talk about how it felt',
+  '10-57': 'pause to notice what feels supportive in the moment and keep the choice easy to revise',
+  '10-34': 'choose a short hands-on activity only if both people have the energy and genuine interest',
+  '3-60': 'try one small new step and allow progress to come in fits and starts'
+};
+
 function matchesPublicChart(chart) {
   const expected = publicNatalGates[chart?.id];
   return expected && JSON.stringify(chart.natalGates) === JSON.stringify(expected);
@@ -41,9 +58,62 @@ export function generatePublicDemoReading(view) {
       const reading = relationshipReadings[pairKey(pair)];
       if (reading) paragraphs.push(reading);
       else paragraphs.push(`${pair.people?.join(' and ') || 'These family members'} are together in this view. Notice what feels familiar between them and where they may have different timing or ways of communicating. The chart details below offer one lens; simple check-ins and direct conversation are more useful than assuming what someone else is feeling.`);
+      const recurrence = pair.transitChannelRecurrence;
+      const recurrenceNotes = [];
+      if (recurrence?.currentState) {
+        const stateDuration = recurrence.currentState;
+        const median = stateDuration.median_days <= 0.5 ? 'about 12 hours' : `about ${stateDuration.median_days} days`;
+        const longest = stateDuration.longest_days < 1 ? `${Math.round(stateDuration.longest_days * 24)} hours` : `${stateDuration.longest_days} days`;
+        const sampleDate = new Date(recurrence.sampleDate).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric', timeZone: 'UTC' });
+        const episodeText = stateDuration.episodes === 1
+          ? 'was seen in a single sampled episode'
+          : `returned in ${stateDuration.episodes.toLocaleString()} sampled episodes`;
+        const standout = stateDuration.episodes === 1
+          ? ' It is a standout configuration within this pair’s modeled timeline'
+          : stateDuration.episodes <= 5
+            ? ' It is among the less-repeated configurations in this pair’s modeled timeline'
+            : '';
+        recurrenceNotes.push(`The bridge-and-center combination sampled on ${sampleDate} ${episodeText} across this pair’s modeled shared lifetime (median ${median}, longest ${longest}), among ${recurrence.uniqueStates.toLocaleString()} modeled combinations.${standout}`);
+      }
+      if (recurrence?.channels?.length) {
+        const item = [...recurrence.channels].sort((a, b) => a.activePct - b.activePct)[0];
+        const duration = item.duration || {};
+        const median = duration.median_days <= 0.5 ? 'about 12 hours' : `about ${duration.median_days} days`;
+        const longest = duration.longest_days < 1 ? `${Math.round(duration.longest_days * 24)} hours` : `${duration.longest_days} days`;
+        const rank = item.relativeFrequencyRank && item.comparisonCount
+          ? `Ranks ${item.relativeFrequencyRank} of ${item.comparisonCount} possible bridge channels by modeled occupancy for this pair`
+          : '';
+        const windowNote = item.expectedThrough ? `Current transit window: ${item.expectedThrough}` : '';
+        const opportunity = channelOpportunities[item.channel]
+          ? `One optional way to explore its theme during this temporary bridge is to ${channelOpportunities[item.channel]}`
+          : item.channelDescription
+            ? `One optional, low-pressure way to explore ${item.channelName || 'this channel theme'} during this temporary bridge is to notice how it shows up in a shared activity`
+            : '';
+        const channelNotes = [
+          `${item.channel.replace('-', '–')} has ${item.episodes.toLocaleString()} modeled episodes, occupying about ${item.activePct}% of this pair’s lifetime samples (median run ${median}; longest ${longest})`,
+          rank,
+          windowNote,
+          opportunity
+        ].filter(Boolean);
+        recurrenceNotes.push(`Of the current transit bridges, ${channelNotes.join('. ')}`);
+      }
+      if (recurrenceNotes.length) paragraphs.push(`${recurrenceNotes.join('. ')}. Based on six-hour samples for this pair, these are modeled recurrence estimates, not population rarity or a forecast of current transit duration.`);
     }
   } else {
     paragraphs.push('Relationship details are not available for the other family charts in this view.');
+  }
+  const familyCharts = [front, ...relationships.flatMap(pair => pair.charts || []).filter(chart => chart?.id !== front.id)];
+  const familyStats = view.familyRecurrence || publicFamilyRecurrence(familyCharts);
+  if (familyStats) {
+    const span = `${new Date(familyStats.span[0]).getUTCFullYear()}–${new Date(familyStats.span[1]).getUTCFullYear()}`;
+    const currentDuration = familyStats.currentStateDuration?.median_days <= 0.5
+      ? 'about 12 hours at the scan’s resolution'
+      : `about ${familyStats.currentStateDuration.median_days} days at the scan’s resolution`;
+    const sampleDate = new Date(familyStats.sampleDate).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric', timeZone: 'UTC' });
+    const configurationNote = familyStats.currentStateEpisodes === 1
+      ? 'This is a standout configuration within the family’s modeled timeline, not a claim that the family is unique in the population.'
+      : `The scan found ${familyStats.currentStateEpisodes} sampled episodes of this configuration; this is a family-specific model comparison, not a population ranking.`;
+    paragraphs.push(`Across the family’s modeled shared-lifetime window (${span}), the six-hour scan found ${familyStats.uniqueStates.toLocaleString()} different combined relationship states. The full-family combination sampled on ${sampleDate} occurred in ${familyStats.currentStateEpisodes} episode${familyStats.currentStateEpisodes === 1 ? '' : 's'} at this resolution, lasting ${currentDuration}. ${configurationNote}`);
   }
   if (view.transitsShown) {
     const changes = front.transitChannelChanges || [];
