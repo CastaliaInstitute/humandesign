@@ -96,6 +96,35 @@ function chartTextColor(person) {
   // Darken the chart swatch for readable text on the light reading panel.
   return chartColor(person).clone().lerp(new THREE.Color('#292820'), 0.36).getStyle();
 }
+function appendPersonColoredText(element, text, people, personName) {
+  element.replaceChildren();
+  const entries = people.map(person => ({ person, name: personName(person) }))
+    .filter(entry => entry.name)
+    .sort((a, b) => b.name.length - a.name.length);
+  if (!entries.length) {
+    element.textContent = text;
+    return;
+  }
+  const byName = new Map(entries.map(entry => [entry.name.toLocaleLowerCase(), entry]));
+  const escapeRegExp = value => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const pattern = new RegExp(`(^|[^\\p{L}\\p{N}_])(${entries.map(entry => escapeRegExp(entry.name)).join('|')})(?=$|[^\\p{L}\\p{N}_])`, 'giu');
+  let cursor = 0;
+  for (const match of text.matchAll(pattern)) {
+    const start = match.index + match[1].length;
+    const end = start + match[2].length;
+    element.append(document.createTextNode(text.slice(cursor, start)));
+    const mention = document.createElement('span');
+    mention.textContent = match[2];
+    const entry = byName.get(match[2].toLocaleLowerCase());
+    if (entry) {
+      mention.style.color = chartTextColor(entry.person);
+      mention.style.fontWeight = '650';
+    }
+    element.append(mention);
+    cursor = end;
+  }
+  element.append(document.createTextNode(text.slice(cursor)));
+}
 function cameraAzimuth() {
   const offset = camera.position.clone().sub(controls.target);
   return Math.atan2(offset.x, offset.z);
@@ -242,6 +271,8 @@ function frontFamilyReading() {
   for (const peer of peers) gates.set(peer, gatesFor(peer));
   const activations = person => window.hdNatalPlanetaryActivations?.[person] || familyChildren.find(child => child.id === person)?.activations || [];
   const personName = person => window.hdChartNames?.[person] || (person === 'daniel' ? 'Person 1' : person === 'camille' ? 'Person 2' : 'Child');
+  const familyPeople = ['daniel', 'camille', ...familyChildren.map(child => child.id)];
+  const appendReadingText = (element, text) => appendPersonColoredText(element, text, familyPeople, personName);
   const frontName = personName(readingPerson);
   const summary = summarizeChart(gates.get(readingPerson), activations(readingPerson));
   const heading = document.querySelector('#familyReadingTitle');
@@ -255,13 +286,13 @@ function frontFamilyReading() {
     return chart ? `${personName(person)} is a ${chart.type}${chart.profile ? ` with a ${chart.profile} profile` : ''} and ${chart.authority.toLowerCase()} authority; their strategy is to ${chart.strategy}` : '';
   }).filter(Boolean);
   const profileLine = document.createElement('p');
-  profileLine.textContent = `Across the family, ${profiles.join('; ')}.`;
+  appendReadingText(profileLine, `Across the family, ${profiles.join('; ')}.`);
   root.append(profileLine);
 
   const visiblePairs = overlappingChartPairs();
   const alignment = document.createElement('p');
   if (visiblePairs.length) {
-    alignment.textContent = `Aligned charts: ${visiblePairs.map(pair => pair.map(personName).join(' and ')).join('; ')}.`;
+    appendReadingText(alignment, `Aligned charts: ${visiblePairs.map(pair => pair.map(personName).join(' and ')).join('; ')}.`);
   } else {
     alignment.textContent = 'No charts are exactly aligned at this angle. Rotate by 45° to compare the next pair.';
   }
@@ -274,6 +305,7 @@ function frontFamilyReading() {
     return `${id.replace('-', '–')}${reading?.name ? ` ${reading.name}` : ''}`;
   });
   intro.textContent = `In front, ${frontName} is a ${summary.type}${summary.profile ? ` with a ${summary.profile} profile` : ''} and ${summary.authority.toLowerCase()} authority. This chart defines ${centerNames.length ? centerNames.join(', ') : 'no centers'}${channelNames.length ? `, including the ${channelNames.join(', ')} channel${channelNames.length === 1 ? '' : 's'}` : ''}. In Human Design, the suggested strategy is to ${summary.strategy}.`;
+  appendReadingText(intro, intro.textContent);
   root.append(intro);
 
   const natalFrontGates = gates.get(readingPerson);
@@ -309,6 +341,7 @@ function frontFamilyReading() {
       const centers = temporaryCenters.length ? ` Together, these activations temporarily define ${temporaryCenters.map(center => centerDescriptions[center]?.[0] || center).join(', ')}.` : '';
       transitSection.textContent = `At ${asOf}, ${[...gateDetails, ...channelDetails].join('; ')}.${centers}`;
     }
+    appendReadingText(transitSection, transitSection.textContent);
     root.append(transitSection);
   }
 
@@ -366,9 +399,10 @@ function frontFamilyReading() {
       }
     }
     const item = document.createElement('p');
-    item.textContent = facts.length
+    const itemText = facts.length
       ? `${nameA} and ${nameB} overlap in this view. ${facts.join('. ')}.`
       : `${nameA} and ${nameB} overlap in this view, but no shared gates or joint channel completions are present.`;
+    appendReadingText(item, itemText);
     root.append(item);
   }
   if (!visiblePairs.length) {
