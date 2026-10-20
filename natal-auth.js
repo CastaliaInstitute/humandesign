@@ -9,6 +9,8 @@ const personB = document.querySelector('#personB');
 const birthDetails = document.querySelector('#birthDetails');
 const birthDetailsButton = document.querySelector('#toggleBirthDetails');
 const authPanel = document.querySelector('#authPanel');
+const menuToggle = document.querySelector('#menuToggle');
+const authMenu = document.querySelector('#authMenu');
 const names = { daniel: 'Person 1', camille: 'Person 2' };
 window.hdChartNames = names;
 function status(message) { statusNode.textContent = message; }
@@ -189,6 +191,11 @@ function fillBirthFields(profile, suffix) {
 function showBirthDetails(show) {
   birthDetails.hidden = !show;
   authPanel.classList.toggle('is-editing', show);
+  if (show) {
+    authPanel.classList.add('is-open');
+    if (authMenu) authMenu.hidden = false;
+    if (menuToggle) menuToggle.setAttribute('aria-expanded', 'true');
+  }
   birthDetailsButton.textContent = show ? 'Hide birth details' : (selectedProfiles.some(p => p.github || p.birth_date) ? 'Edit birth details' : 'Enter birth details');
 }
 let selectedProfiles = [
@@ -252,6 +259,21 @@ if (config.supabaseUrl && config.supabaseAnonKey) {
   supabase.auth.getSession().then(({ data }) => handleSession(data.session));
 } else { loginButton.disabled = true; status('Showing Daniel and Camille as example charts. Castalia sign-in is not configured yet.'); }
 birthDetailsButton.addEventListener('click', () => showBirthDetails(birthDetails.hidden));
+if (menuToggle && authMenu) {
+  menuToggle.addEventListener('click', () => {
+    const open = authMenu.hidden;
+    authMenu.hidden = !open;
+    authPanel.classList.toggle('is-open', open);
+    menuToggle.setAttribute('aria-expanded', String(open));
+  });
+  document.addEventListener('click', event => {
+    if (!authPanel.contains(event.target) && !authMenu.hidden) {
+      authMenu.hidden = true;
+      authPanel.classList.remove('is-open');
+      menuToggle.setAttribute('aria-expanded', 'false');
+    }
+  });
+}
 document.querySelector('#applyBirthDetails').addEventListener('click', () => { void applyProfiles(); });
 async function handleSession(session) {
   if (!session?.user || !supabase) return;

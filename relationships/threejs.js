@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import '../transit-data.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { SVGLoader } from 'three/addons/loaders/SVGLoader.js';
 
@@ -35,6 +36,8 @@ const chartRoot = new THREE.Group();
 scene.add(chartRoot);
 const planeGroups = {};
 let relationshipGroup = null;
+let transitGroup = null;
+let transitSnapshot = null;
 let sourceDocument = null;
 let loader = null;
 const gateDescriptions = new Map();
@@ -427,6 +430,57 @@ function makeRelationshipGroup(danielData, camilleData, danielGates, camilleGate
   group.userData.bridgeCount = bridgeCount;
   return group;
 }
+function makeTransitGroup(data, snapshot) {
+  const group = new THREE.Group();
+  group.name = 'Current Human Design transit overlay';
+  const gates = new Set(snapshot.gates);
+  const gatePoints = getGatePoints(data.paths);
+  const transitColor = new THREE.Color('#eab64b');
+  const roadMaterial = lineMaterial(transitColor, 0.96);
+  const ringMaterial = new THREE.MeshBasicMaterial({ color: transitColor, transparent: true, opacity: 0.98, side: THREE.DoubleSide, depthWrite: false, toneMapped: false });
+  for (const path of data.paths) {
+    const node = path.userData.node;
+    if (!node) continue;
+    const cls = node.getAttribute('class') || '';
+    const channel = channelGroup(node);
+    if (!channel || !cls.split(/\s+/).includes('channel') || cls.includes('paired-rail')) continue;
+    const from = +channel.dataset.from, to = +channel.dataset.to;
+    if (!gates.has(from) || !gates.has(to) || !path.subPaths?.length) continue;
+    const channelId = `${Math.min(from, to)}-${Math.max(from, to)}`;
+    const reading = relationshipChannelReadings[channelId] || channelDescriptions.get(channelId);
+    const fromPlanets = snapshot.gatePlanets[from]?.join(', ') || 'transit';
+    const toPlanets = snapshot.gatePlanets[to]?.join(', ') || 'transit';
+    const hover = hoverInfo(
+      `transit:channel:${channelId}`,
+      `Transit channel ${from}–${to}${reading?.name ? ` · ${reading.name}` : ''}`,
+      `${reading?.description || 'The channel between these gates is temporarily activated.'} Both gates are active in the current sky: Gate ${from} (${fromPlanets}) and Gate ${to} (${toPlanets}). Temporary transit overlay · ${snapshot.source}.`
+    );
+    const points = path.subPaths[0].getPoints(48);
+    const road = tubeFromPoints(points, 1.35, roadMaterial, 4.5);
+    if (road) { Object.assign(road.userData, hover); group.add(road); }
+    const flowCurve = new THREE.CatmullRomCurve3(points.map(point => new THREE.Vector3(point.x, point.y, 5.2)), false, 'centripetal');
+    addFlowMotion(group, flowCurve, '#fff3bf', hover);
+  }
+  for (const gate of gates) {
+    const point = gatePoints.get(gate);
+    if (!point) continue;
+    const ring = new THREE.Mesh(new THREE.RingGeometry(3.0, 4.2, 32), ringMaterial);
+    ring.position.set(point.x, point.y, 5.4);
+    Object.assign(ring.userData, hoverInfo(
+      `transit:gate:${gate}`,
+      `Transit gate ${gate}`,
+      `Current planetary activations: ${(snapshot.gatePlanets[gate] || []).join(', ') || 'transit'}. This is a temporary sky activation, separate from either natal chart. ${snapshot.source}.`
+    ));
+    group.add(ring);
+    const hit = new THREE.Mesh(new THREE.SphereGeometry(4.6, 10, 8), new THREE.MeshBasicMaterial({ colorWrite: false, depthWrite: false }));
+    hit.position.copy(ring.position);
+    Object.assign(hit.userData, ring.userData);
+    group.add(hit);
+  }
+  group.scale.y = -1;
+  group.position.set(-194.4, 194.4, 0);
+  return group;
+}
 function rebuildRelationship() {
   if (!sourceDocument || !loader) return;
   clearHover();
@@ -462,9 +516,28 @@ function rebuildRelationship() {
   relationshipGroup = makeRelationshipGroup(layers.daniel, layers.camille, danielGates, camilleGates, separation);
   chartRoot.add(relationshipGroup);
   relationshipGroup.visible = document.querySelector('#showBridges').checked;
+  releaseGroup(transitGroup);
+  if (transitSnapshot) {
+    const transitData = loader.parse(extractLayer(sourceDocument, 'daniel', new Set(transitSnapshot.gates)));
+    transitGroup = makeTransitGroup(transitData, transitSnapshot);
+    chartRoot.add(transitGroup);
+    transitGroup.visible = document.querySelector('#showTransits').checked;
+  }
   planeGroups.daniel.visible = document.querySelector('#showDaniel').checked;
   planeGroups.camille.visible = document.querySelector('#showCamille').checked;
   setStatus(`${relationshipGroup.userData.bridgeCount} relationship channel${relationshipGroup.userData.bridgeCount === 1 ? '' : 's'} shown.`);
+}
+
+async function refreshTransits() {
+  const status = document.querySelector('#transitStatus');
+  try {
+    transitSnapshot = await window.CastaliaHumanDesignTransit.currentSnapshot();
+    const time = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(transitSnapshot.epoch * 1000));
+    status.textContent = `As of ${time} · ${transitSnapshot.source}; Sun through Saturn + Earth.`;
+    if (sourceDocument && loader) rebuildRelationship();
+  } catch (error) {
+    status.textContent = `Current transits unavailable: ${error.message}`;
+  }
 }
 
 function resize() {
@@ -614,6 +687,8 @@ async function init() {
     }
     rebuildRelationship();
     resize();
+    void refreshTransits();
+    window.setInterval(() => void refreshTransits(), 15 * 60 * 1000);
   } catch (error) {
     setStatus(`Unable to load BodyGraph geometry: ${error.message}`);
     console.error(error);
@@ -627,6 +702,7 @@ for (const selector of ['#danielGates', '#camilleGates']) document.querySelector
 document.querySelector('#showBridges').addEventListener('change', e => { if (relationshipGroup) relationshipGroup.visible = e.target.checked; });
 document.querySelector('#showDaniel').addEventListener('change', e => { if (planeGroups.daniel) planeGroups.daniel.visible = e.target.checked; });
 document.querySelector('#showCamille').addEventListener('change', e => { if (planeGroups.camille) planeGroups.camille.visible = e.target.checked; });
+document.querySelector('#showTransits').addEventListener('change', e => { if (transitGroup) transitGroup.visible = e.target.checked; });
 document.querySelector('#front').addEventListener('click', () => orient('front'));
 document.querySelector('#edge').addEventListener('click', () => orient('edge'));
 document.querySelector('#reset').addEventListener('click', () => orient('reset'));
