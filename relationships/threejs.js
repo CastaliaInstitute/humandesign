@@ -1249,18 +1249,22 @@ function resize() {
   if (!rect.width || !rect.height) return;
   renderer.setSize(rect.width, rect.height, false);
   const aspect = rect.width / rect.height;
-  const furthestChild = childPlaneRadius();
   const chartWidth = 388.8 * familyLayout.parentScale;
   const chartHeight = chartViewHeight * familyLayout.parentScale;
-  // Fit four chart columns horizontally and the full chart height vertically.
-  // In portrait layouts, constrain width by the canvas height so aspect ratio
-  // does not make the family collapse to a tiny cluster.
-  const halfHeight = chartHeight / 2 + 8;
-  const halfWidth = Math.max(
-    chartWidth / 0.4,
-    furthestChild + chartWidth / 2 + 8,
-    halfHeight * aspect * 0.82
+  // Size chart width against the viewport, then expand only if the currently
+  // projected family footprint requires it. A projected-width calculation
+  // avoids shrinking the charts based on the circle's hidden depth.
+  const desiredHalfWidth = rect.width * chartWidth / (rect.width * 0.4);
+  const chartCenters = Object.keys(currentNatalGates || {}).map(person =>
+    chartPointInFamily({ x: 194.4, y: chartViewHeight / 2 }, person)
   );
+  let projectedHalfWidth = 0;
+  if (chartCenters.length) {
+    const cameraRight = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
+    projectedHalfWidth = Math.max(...chartCenters.map(center => Math.abs(center.dot(cameraRight)))) + chartWidth / 2 + 8;
+  }
+  const halfWidth = Math.max(desiredHalfWidth, projectedHalfWidth);
+  const halfHeight = Math.max(chartHeight / 2 + 8, halfWidth / aspect);
   camera.left = -halfWidth;
   camera.right = halfWidth;
   camera.top = halfHeight;
