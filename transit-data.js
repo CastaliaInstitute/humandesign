@@ -1,5 +1,6 @@
 (() => {
   const BASE = 'https://ephemeris.castalia.institute/data/ephem';
+  const LIFETIME_BASE = 'https://ephemeris.castalia.institute/data/lifetime-ephem';
   const ephemerisCache = new Map();
   const GATE_ORDER = [25,17,21,51,42,3,27,24,2,23,8,20,16,35,45,12,15,52,39,53,62,56,31,33,7,4,29,59,40,64,47,6,46,18,48,57,32,50,28,44,1,43,14,34,9,5,26,11,10,58,38,54,61,60,41,19,13,49,30,55,37,63,22,36];
   const gateAt = longitude => {
@@ -10,10 +11,14 @@
   async function monthData(epoch, noCache = false) {
     const month = new Date(epoch * 1000).toISOString().slice(0, 7);
     if (!ephemerisCache.has(month) || noCache) {
-      const request = fetch(`${BASE}/${month}.json`, { cache: noCache ? 'no-cache' : 'default' }).then(async response => {
-        if (!response.ok) throw new Error(`Transit ephemeris unavailable (${response.status}) for ${month}.`);
-        return response.json();
-      });
+      const request = (async () => {
+        const options = { cache: noCache ? 'no-cache' : 'default' };
+        const currentResponse = await fetch(`${BASE}/${month}.json`, options);
+        if (currentResponse.ok) return currentResponse.json();
+        const lifetimeResponse = await fetch(`${LIFETIME_BASE}/${month}.json`, options);
+        if (lifetimeResponse.ok) return lifetimeResponse.json();
+        throw new Error(`Transit ephemeris unavailable for ${month} (monthly feed ${currentResponse.status}; lifetime feed ${lifetimeResponse.status}).`);
+      })();
       ephemerisCache.set(month, request);
       request.catch(() => { if (ephemerisCache.get(month) === request) ephemerisCache.delete(month); });
     }
