@@ -705,8 +705,10 @@ function makePlaneGroup(paths, person, sharedChannels, relationshipChannels, opt
   group.scale.y = -1;
   group.position.set(-194.4, chartViewHeight, 0);
   if (options.scale) {
-    group.scale.set(options.scale, -options.scale, options.scale);
-    group.position.set(-194.4 * options.scale + (options.offsetX || 0), chartViewHeight * options.scale + (options.offsetY || 0), 0);
+    const xScale = options.flipX ? -options.scale : options.scale;
+    const xOffset = options.flipX ? 194.4 * options.scale : -194.4 * options.scale;
+    group.scale.set(xScale, -options.scale, options.scale);
+    group.position.set(xOffset + (options.offsetX || 0), chartViewHeight * options.scale + (options.offsetY || 0), 0);
   }
   return group;
 }
@@ -770,7 +772,8 @@ function chartPointInFamily(point, person, localDepth = 0) {
   } else {
     centerY = person === 'daniel' ? familyLayout.parentRadius : -familyLayout.parentRadius;
   }
-  const localX = point.x * scale - 194.4 * scale;
+  const flipX = isChild && childIndex % 2 === 1;
+  const localX = flipX ? 194.4 * scale - point.x * scale : point.x * scale - 194.4 * scale;
   const localY = -point.y * scale + chartViewHeight * scale + centerY;
   const localZ = localDepth * scale;
   if (isChild) {
@@ -1090,6 +1093,7 @@ function rebuildRelationship() {
     const offsetY = 0;
     const childPosition = new THREE.Group();
     const childScale = familyLayout.childScale;
+    const flipX = side < 0;
     childPosition.position.set(offsetX, offsetY, offsetZ);
     childPosition.rotation.y = Math.atan2(-offsetX, -offsetZ);
     const childGates = natalGates[child.id];
@@ -1097,9 +1101,8 @@ function rebuildRelationship() {
     chartData[child.id] = childData;
     const color = childPalette[index % childPalette.length];
     const childGroup = makePlaneGroup(childData.paths, child.id, new Set(), relationshipChannels, {
-      color, name: child.name, scale: childScale
+      color, name: child.name, scale: childScale, flipX
     });
-    childGroup.position.set(-194.4 * childScale, chartViewHeight * childScale, 0);
     childPosition.visible = true;
     childPosition.add(childGroup);
     familyGroups[child.id] = childPosition;
@@ -1108,8 +1111,8 @@ function rebuildRelationship() {
       const activations = new Set([...childGates, ...activeTransitSnapshot.gates]);
       const transitData = loader.parse(extractLayer(sourceDocument, 'daniel', activations));
       const transitGroup = makeTransitGroup(transitData, activeTransitSnapshot, childGates, child.id);
-      transitGroup.scale.set(childScale, -childScale, childScale);
-      transitGroup.position.set(-194.4 * childScale, chartViewHeight * childScale, 0);
+      transitGroup.scale.set(flipX ? -childScale : childScale, -childScale, childScale);
+      transitGroup.position.set(flipX ? 194.4 * childScale : -194.4 * childScale, chartViewHeight * childScale, 0);
       transitGroups[child.id] = transitGroup;
       childPosition.add(transitGroup);
       transitGroup.visible = transitToggle.checked;
