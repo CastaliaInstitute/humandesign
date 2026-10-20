@@ -58,6 +58,27 @@ function parseGates(selector) {
   return new Set((document.querySelector(selector)?.value || '').match(/\d+/g)?.map(Number) || []);
 }
 
+function referenceDateInQuestion(question) {
+  const marker = /\b(?:since|from|compared\s+(?:with|to)|versus|vs\.?)\s+(?:the\s+)?/i.exec(question);
+  if (!marker) return null;
+  const remainder = question.slice(marker.index + marker[0].length);
+  const localDate = (year, month, day) => {
+    const date = new Date(year, month, day, 12);
+    return date.getFullYear() === year && date.getMonth() === month && date.getDate() === day ? date : null;
+  };
+  const iso = remainder.match(/\b(\d{4})-(\d{1,2})(?:-(\d{1,2}))?\b/);
+  if (iso) {
+    return localDate(Number(iso[1]), Number(iso[2]) - 1, Number(iso[3] || 1));
+  }
+  const monthNames = ['january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december'];
+  const named = remainder.match(/\b(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\.?\s+(?:(\d{1,2})(?:st|nd|rd|th)?[,]?\s+)?(\d{4})\b/i);
+  if (!named) return null;
+  const monthPrefix = named[1].toLowerCase();
+  const monthIndex = monthNames.findIndex(name => name.startsWith(monthPrefix));
+  if (monthIndex < 0) return null;
+  return localDate(Number(named[3]), monthIndex, Number(named[2] || 1));
+}
+
 async function getChannelDefinitions() {
   if (!channelDefinitions) {
     channelDefinitions = fetch('/bodygraph.svg', { cache: 'force-cache' }).then(async response => {
@@ -156,7 +177,28 @@ function remainingLabel(snapshotEpoch, exitsAt) {
   return days ? `about ${days}d ${remainderHours}h remaining` : `about ${Math.max(1, hours)}h remaining`;
 }
 
-async function buildChartContext() {
+function compareChannelSets(firstSet, secondSet, currentOnlyDetails = new Map()) {
+  const referenceById = new Map(firstSet.map(channel => [channel.channel, channel]));
+  const currentById = new Map(secondSet.map(channel => [channel.channel, channel]));
+  return {
+    addedSinceReference: [...currentById.values()]
+      .filter(channel => !referenceById.has(channel.channel))
+      .map(channel => {
+        const detail = currentOnlyDetails.get(channel.channel);
+        return {
+          channel: channel.channel,
+          description: channel.chartGuide,
+          expectedToStopCompletingAtLocal: detail?.expectedToStopCompletingAtLocal || null,
+          estimatedRemaining: detail?.estimatedRemaining || 'end estimate unavailable'
+        };
+      }),
+    noLongerActiveSinceReference: [...referenceById.values()]
+      .filter(channel => !currentById.has(channel.channel))
+      .map(channel => ({ channel: channel.channel, description: channel.chartGuide }))
+  };
+}
+
+async function buildChartContext(question = '') {
   await waitForNatalProfiles();
   const transit = window.CastaliaHumanDesignTransit;
   const timelineView = window.hdCurrentReadingView;
@@ -165,10 +207,12 @@ async function buildChartContext() {
   const snapshot = lifetimeTimeline
     ? await transit.snapshotAt(new Date(timelineView.transitEpoch))
     : await transit.currentSnapshot();
+  const referenceDate = referenceDateInQuestion(question);
   const [durations, definitions] = await Promise.all([
-    lifetimeTimeline ? Promise.resolve([]) : transit.estimateDurations(snapshot),
+    lifetimeTimeline && !referenceDate ? Promise.resolve([]) : transit.estimateDurations(snapshot, 240),
     getChannelDefinitions()
   ]);
+  const referenceSnapshot = referenceDate ? await transit.snapshotAt(referenceDate) : null;
   const danielGates = parseGates('#danielGates');
   const camilleGates = parseGates('#camilleGates');
   if (!danielGates.size || !camilleGates.size) throw new Error('The selected charts are still being calculated. Wait a moment and try again.');
@@ -221,6 +265,52 @@ async function buildChartContext() {
       });
     }
   }
+  let comparison = null;
+  if (referenceSnapshot) {
+    const referenceTransitGates = new Set(referenceSnapshot.gates);
+    const referenceCharts = [
+      { id: 'daniel', name: charts.blue.name, natalGates: danielGates },
+      { id: 'camille', name: charts.pink.name, natalGates: camilleGates },
+      ...children.map(child => ({ id: child.id, name: child.name, natalGates: new Set(child.natalGates) }))
+    ];
+    const currentChannelDetails = new Map();
+    for (const chart of referenceCharts) {
+      for (const channel of transitChannelChanges(definitions, chart.natalGates, snapshot, durationByPlanet)) {
+        currentChannelDetails.set(`${chart.id}:${channel.channel}`, channel);
+      }
+    }
+    const chartChanges = referenceCharts.map(chart => {
+      const before = activeChannels(definitions, chart.natalGates, referenceTransitGates, 'transit at the reference date');
+      const after = activeChannels(definitions, chart.natalGates, transitGates, 'transit at the selected time');
+      const changes = compareChannelSets(before, after, new Map(
+        [...currentChannelDetails.entries()]
+          .filter(([key]) => key.startsWith(`${chart.id}:`))
+          .map(([key, detail]) => [key.slice(chart.id.length + 1), detail])
+      ));
+      return { person: chart.name, ...changes };
+    });
+    const relationshipChanges = [];
+    for (let i = 0; i < referenceCharts.length; i++) {
+      for (let j = i + 1; j < referenceCharts.length; j++) {
+        const first = referenceCharts[i], second = referenceCharts[j];
+        const before = bridgesBetween(definitions, first, second, referenceTransitGates, referenceSnapshot, {});
+        const after = bridgesBetween(definitions, first, second, transitGates, snapshot, durationByPlanet);
+        const changes = compareChannelSets(before, after, new Map(after.map(channel => [channel.channel, channel])));
+        if (changes.addedSinceReference.length || changes.noLongerActiveSinceReference.length) {
+          relationshipChanges.push({ people: [first.name, second.name], ...changes });
+        }
+      }
+    }
+    comparison = {
+      referenceAsOf: referenceSnapshot.timestamp,
+      referenceAsOfLocal: new Date(referenceSnapshot.epoch * 1000).toLocaleString(),
+      selectedAsOf: snapshot.timestamp,
+      selectedAsOfLocal: new Date(snapshot.epoch * 1000).toLocaleString(),
+      ephemeris: `${referenceSnapshot.sampleStepSeconds / 60}-minute reference samples; ${snapshot.sampleStepSeconds / 60}-minute selected-time samples`,
+      people: chartChanges,
+      relationships: relationshipChanges
+    };
+  }
   return {
     asOf: snapshot.timestamp,
     asOfLocal: new Date(snapshot.epoch * 1000).toLocaleString(),
@@ -240,6 +330,7 @@ async function buildChartContext() {
     children,
     currentRelationshipBridges: bridgesBetween(definitions, familyCharts[0], familyCharts[1], transitGates, snapshot, durationByPlanet),
     familyConnections,
+    ...(comparison ? { comparison } : {}),
     familyRecurrence: publicFamilyRecurrence(familyCharts.map(chart => ({ id: chart.id, natalGates: [...chart.natalGates].sort((a, b) => a - b) })))
   };
 }
@@ -266,10 +357,14 @@ function composeUserMessage(question, context, firstReading) {
   const prompt = firstReading
     ? `Give me a warm, specific reading of this example family BodyGraph. Start with the parent dynamic, then describe each child in relation to the family using the supplied family connections. Separate natal patterns from ${context.lifetimeTimeline ? 'transits at the selected time' : 'current transits'}. Focus the transit portion on channels temporarily completed in each chart or relationship, and explain when they are expected to stop completing as their transit gates move on. Include estimated local time bounds only where supplied. Use lifetime recurrence data to call attention to a genuinely distinctive configuration within this family’s modeled timeline when its sample date matches the snapshot; give its count and sample date, and do not call it unique or rare in the population. For a temporary bridge, connect its channel theme to one practical, low-pressure activity the people could try together; time-bound it only if an estimated window is supplied. Keep the activity optional and never imply a guaranteed outcome. Mention a transit gate only to explain a channel change; do not list all active gates. Keep it grounded in supplied gates, recurrence statistics, and channel descriptions; do not infer unsupported traits.`
     : question;
+  const compareGuidance = context.comparison
+    ? 'Use the supplied comparison object to identify channels newly active since the reference date and channels that were active then but are no longer active at the selected time. Name both dates. Report changes for individual charts and family relationships. If a list is empty, say no channels changed in that category. For each newly active channel, give its estimated end time when supplied; otherwise say its end estimate is unavailable. Do not infer end dates for channels that have already ended.'
+    : '';
   return [
     'Verified chart and selected-time/current transit context (JSON facts):',
     JSON.stringify(context),
     prior ? `Recent conversation:\n${prior}` : '',
+    compareGuidance,
     `User ${firstReading ? 'request' : 'question'}: ${prompt}`
   ].filter(Boolean).join('\n\n');
 }
@@ -296,7 +391,7 @@ async function requestReading(question, firstReading = false) {
       }
       throw new Error('Castalia sign-in is not configured for this example reading.');
     }
-    const context = await buildChartContext();
+    const context = await buildChartContext(question);
     const userMessage = composeUserMessage(question, context, firstReading);
     const response = await fetch(`${String(config.supabaseUrl).replace(/\/+$/, '')}/functions/v1/voice-pipeline`, {
       method: 'POST',
