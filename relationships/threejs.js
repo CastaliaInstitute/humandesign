@@ -302,15 +302,15 @@ function frontFamilyReading() {
     const facts = [`${sharedGates.length} shared gate${sharedGates.length === 1 ? '' : 's'}${sharedGates.length ? ` (${sharedGates.join(', ')})` : ''}`];
     if (complementary.length) facts.push(`together complete ${complementary.map(channel => `${channel.label}${channel.reading?.name ? ` ${channel.reading.name}` : ''}`).join(', ')}`);
     if (sharedChannels.length) facts.push(`both charts define ${sharedChannels.map(channel => channel.label).join(', ')}`);
-    if (frontCompletePeerGate.length) facts.push(`${peerName(peer)} has the other gate of ${frontCompletePeerGate.map(channel => channel.label).join(', ')}, already defined in ${frontName}'s chart`);
-    if (peerCompleteFrontGate.length) facts.push(`${frontName} has a gate in ${peerName(peer)}'s complete ${peerCompleteFrontGate.map(channel => channel.label).join(', ')}`);
+    if (frontCompletePeerGate.length) facts.push(`${personName(peer)} has the other gate of ${frontCompletePeerGate.map(channel => channel.label).join(', ')}, already defined in ${frontName}'s chart`);
+    if (peerCompleteFrontGate.length) facts.push(`${frontName} has a gate in ${personName(peer)}'s complete ${peerCompleteFrontGate.map(channel => channel.label).join(', ')}`);
     const peerDefines = new Set(peerSummary?.definedCenters || []);
     const frontDefines = new Set(summary.definedCenters);
     const peerToFront = [...peerDefines].filter(center => !frontDefines.has(center));
     const frontToPeer = [...frontDefines].filter(center => !peerDefines.has(center));
     const centerName = center => centerDescriptions[center]?.[0] || center;
-    if (peerToFront.length) facts.push(`conditioning lens: ${peerName(peer)} has defined ${peerToFront.map(centerName).join(', ')} center${peerToFront.length === 1 ? '' : 's'} where ${frontName}'s are not defined`);
-    if (frontToPeer.length) facts.push(`${frontName} has defined ${frontToPeer.map(centerName).join(', ')} center${frontToPeer.length === 1 ? '' : 's'} where ${peerName(peer)}'s are not defined`);
+    if (peerToFront.length) facts.push(`conditioning lens: ${personName(peer)} has defined ${peerToFront.map(centerName).join(', ')} center${peerToFront.length === 1 ? '' : 's'} where ${frontName}'s are not defined`);
+    if (frontToPeer.length) facts.push(`${frontName} has defined ${frontToPeer.map(centerName).join(', ')} center${frontToPeer.length === 1 ? '' : 's'} where ${personName(peer)}'s are not defined`);
     if (transitToggle.checked && transitSnapshot) {
       const peerActive = new Set([...peerGates, ...transitGates]);
       const temporaryConnections = channels.flatMap(channel => {
@@ -337,7 +337,7 @@ function frontFamilyReading() {
         facts.push(`current transit connection: ${connectionText.join('; ')}`);
       }
     }
-    item.textContent = `With ${peerName(peer)}: ${facts.join('; ')}.`;
+    item.textContent = `With ${personName(peer)}: ${facts.join('; ')}.`;
     root.append(item);
   }
   const note = document.createElement('small');
@@ -1147,7 +1147,7 @@ function resize() {
   renderer.setSize(rect.width, rect.height, false);
   const aspect = rect.width / rect.height;
   const furthestChild = childPlaneRadius();
-  const halfWidth = Math.max(300 * aspect, furthestChild + 194.4 * familyLayout.childScale + 35, 165);
+  const halfWidth = Math.max(furthestChild + 194.4 * familyLayout.childScale + 35, 194.4 * familyLayout.parentScale + 35, 165);
   const halfHeight = Math.max(chartViewHeight * familyLayout.parentScale / 2 + 35, chartViewHeight * familyLayout.childScale / 2 + 35, halfWidth / aspect);
   camera.left = -halfWidth;
   camera.right = halfWidth;
