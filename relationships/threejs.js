@@ -45,9 +45,7 @@ scene.add(chartRoot);
 // Rotate the whole family layout around its shared center. Keeping the camera
 // fixed preserves the exact-overlap front view as the starting orientation.
 let familyAzimuth = 0;
-let childAlignmentTurn = null;
 function rotateFamily(step) {
-  childAlignmentTurn = null;
   familyAzimuth += step;
   chartRoot.rotation.y = familyAzimuth;
   refreshFrontFamilyReading();
@@ -57,13 +55,8 @@ let relationshipGroup = null;
 const transitGroups = {};
 const familyGroups = {};
 let familyChildren = [];
-let comparisonPair = null;
 let transitSnapshot = null;
 let transitDurationEstimates = [];
-const comparisonBaseSelect = document.querySelector('#compareBase');
-const comparisonOverlaySelect = document.querySelector('#compareOverlay');
-const comparisonControl = comparisonBaseSelect?.closest('.control');
-if (comparisonControl) document.querySelector('#authMenu')?.append(comparisonControl);
 const transitToggle = document.querySelector('#showTransits');
 try {
   transitToggle.checked = localStorage.getItem('castalia-hd-show-transits') !== 'false';
@@ -85,25 +78,8 @@ const autoRotateSpeed = 0.035; // radians per second; one slow turn takes about 
 const colors = { daniel: new THREE.Color('#087fa5'), camille: new THREE.Color('#cf4f79') };
 const childPalette = ['#488f73', '#b67a37', '#7864a6', '#518a9d'].map(color => new THREE.Color(color));
 const familyLayout = { parentScale: parentChartScale, childScale: parentChartScale, parentRadius: 0 };
-const overlapDepthOffset = 0.18;
 function childPlaneRadius() {
   return Number(document.querySelector('#separation').value) / 2;
-}
-function updateComparisonOptions() {
-  if (!comparisonBaseSelect || !comparisonOverlaySelect) return;
-  const people = [
-    { id: 'daniel', name: window.hdChartNames?.daniel || 'Daniel' },
-    { id: 'camille', name: window.hdChartNames?.camille || 'Camille' },
-    ...familyChildren.map((child, index) => ({ id: child.id, name: child.name || `Child ${index + 1}` }))
-  ];
-  if (comparisonPair && comparisonPair.some(id => !people.some(person => person.id === id))) comparisonPair = null;
-  const populate = (select, placeholder, selected) => {
-    select.replaceChildren(new Option(placeholder, ''));
-    people.forEach(person => select.add(new Option(person.name, person.id)));
-    select.value = people.some(person => person.id === selected) ? selected : '';
-  };
-  populate(comparisonBaseSelect, 'Choose first chart…', comparisonPair?.[0]);
-  populate(comparisonOverlaySelect, 'Choose second chart…', comparisonPair?.[1]);
 }
 function chartColor(person) {
   if (colors[person]) return colors[person];
@@ -635,7 +611,7 @@ function makePlaneGroup(paths, person, sharedChannels, relationshipChannels, opt
       // In exact front view, separate shared tracks by a few pixels so both
       // contributors remain visibly blue and pink instead of blending purple.
       const opacity = active ? (exactFrontAlignment ? 0.46 : 0.78) : 0.17;
-      const sharedOffset = !comparisonPair && exactFrontAlignment && active && sharedChannels.has(channelId) ? (person === 'daniel' ? -2.2 : 2.2) : 0;
+      const sharedOffset = exactFrontAlignment && active && sharedChannels.has(channelId) ? (person === 'daniel' ? -2.2 : 2.2) : 0;
       // Each SVG rail becomes a two-lane carriageway; the divider and dashed lane marks make the road legible in depth.
       const roadMat = lineMaterial(roadColor, opacity);
       const laneMat = lineMaterial(pale, active ? (exactFrontAlignment ? 0.22 : 0.7) : 0.13);
@@ -762,15 +738,6 @@ function getGatePoints(paths) {
 function chartPointInFamily(point, person, localDepth = 0) {
   const childIndex = familyChildren.findIndex(child => child.id === person);
   const isChild = childIndex >= 0;
-  if (comparisonPair?.includes(person)) {
-    const chart = isChild
-      ? familyGroups[person]?.children.find(item => item.name.includes('SVG plane'))
-      : planeGroups[person];
-    if (chart) {
-      chartRoot.updateMatrixWorld(true);
-      return chartRoot.worldToLocal(chart.localToWorld(new THREE.Vector3(point.x, point.y, localDepth)));
-    }
-  }
   const scale = isChild ? familyLayout.childScale : familyLayout.parentScale;
   let centerX = 0, centerY = 0, centerZ = 0, childRotation = 0;
   if (isChild) {
@@ -834,7 +801,7 @@ function makeRelationshipGroup(chartData, natalGates, transitSnapshot) {
   };
   const transitPurple = lineMaterial(new THREE.Color('#7c3aed'), 0.95);
   const transitGates = new Set(transitSnapshot?.gates || []);
-  const people = comparisonPair || Object.keys(chartData);
+  const people = Object.keys(chartData);
   const gatePoints = Object.fromEntries(people.map(person => [person, getGatePoints(chartData[person].paths)]));
   const personNames = Object.fromEntries(people.map(person => [person, window.hdChartNames?.[person] || (person === 'daniel' ? 'Person 1' : person === 'camille' ? 'Person 2' : 'Child')]));
   const gateMarkerMaterial = (person, gate) => natalGates[person]?.has(gate) ? materialFor(person) : transitPurple;
@@ -1020,7 +987,7 @@ function rebuildRelationship() {
     const data = loader.parse(extractLayer(sourceDocument, person, natalGates[person]));
     chartData[person] = data;
     releaseGroup(planeGroups[person]);
-    const centerY = comparisonPair ? 0 : person === 'daniel' ? familyLayout.parentRadius : -familyLayout.parentRadius;
+    const centerY = person === 'daniel' ? familyLayout.parentRadius : -familyLayout.parentRadius;
     const group = makePlaneGroup(data.paths, person, sharedChannels, relationshipChannels, {
       scale: familyLayout.parentScale, offsetY: centerY
     });
@@ -1033,13 +1000,8 @@ function rebuildRelationship() {
   }
   const separation = Number(document.querySelector('#separation').value);
   const half = separation / 2;
-  if (comparisonPair) {
-    planeGroups.daniel.position.z = comparisonPair[0] === 'daniel' ? 0 : comparisonPair[1] === 'daniel' ? overlapDepthOffset : 0;
-    planeGroups.camille.position.z = comparisonPair[0] === 'camille' ? 0 : comparisonPair[1] === 'camille' ? overlapDepthOffset : 0;
-  } else {
-    planeGroups.daniel.position.z = frontPerson === 'daniel' ? half : -half;
-    planeGroups.camille.position.z = -planeGroups.daniel.position.z;
-  }
+  planeGroups.daniel.position.z = frontPerson === 'daniel' ? half : -half;
+  planeGroups.camille.position.z = -planeGroups.daniel.position.z;
   document.querySelector('#separationValue').value = String(separation);
   for (const [person, group] of Object.entries(transitGroups)) {
     releaseGroup(group);
@@ -1051,13 +1013,13 @@ function rebuildRelationship() {
       const activations = new Set([...natalGates, ...activeTransitSnapshot.gates]);
       const transitData = loader.parse(extractLayer(sourceDocument, person, activations));
       const group = makeTransitGroup(transitData, activeTransitSnapshot, natalGates, person);
-      const centerY = comparisonPair ? 0 : person === 'daniel' ? familyLayout.parentRadius : -familyLayout.parentRadius;
+      const centerY = person === 'daniel' ? familyLayout.parentRadius : -familyLayout.parentRadius;
       group.scale.set(familyLayout.parentScale, -familyLayout.parentScale, familyLayout.parentScale);
       group.position.set(-194.4 * familyLayout.parentScale, chartViewHeight * familyLayout.parentScale + centerY, 0);
       group.position.z = planeGroups[person].position.z;
       transitGroups[person] = group;
       chartRoot.add(group);
-      group.visible = transitToggle.checked && (!comparisonPair || comparisonPair.includes(person));
+      group.visible = transitToggle.checked;
     }
   }
   familyChildren.forEach((child, index) => {
@@ -1071,15 +1033,9 @@ function rebuildRelationship() {
     const offsetZ = Math.sin(angle) * distance;
     const offsetY = 0;
     const childPosition = new THREE.Group();
-    const inComparison = comparisonPair?.includes(child.id) || false;
-    const childScale = inComparison ? familyLayout.parentScale : familyLayout.childScale;
-    const comparisonDepth = comparisonPair?.[0] === child.id ? 0 : overlapDepthOffset;
-    childPosition.position.set(
-      inComparison ? 0 : offsetX,
-      offsetY,
-      inComparison ? comparisonDepth : offsetZ
-    );
-    childPosition.rotation.y = inComparison ? 0 : Math.atan2(-offsetX, -offsetZ);
+    const childScale = familyLayout.childScale;
+    childPosition.position.set(offsetX, offsetY, offsetZ);
+    childPosition.rotation.y = Math.atan2(-offsetX, -offsetZ);
     const childGates = natalGates[child.id];
     const childData = loader.parse(extractLayer(sourceDocument, 'daniel', childGates));
     chartData[child.id] = childData;
@@ -1088,7 +1044,7 @@ function rebuildRelationship() {
       color, name: child.name, scale: childScale
     });
     childGroup.position.set(-194.4 * childScale, chartViewHeight * childScale, 0);
-    childPosition.visible = !comparisonPair || inComparison;
+    childPosition.visible = true;
     childPosition.add(childGroup);
     familyGroups[child.id] = childPosition;
     chartRoot.add(childPosition);
@@ -1107,19 +1063,15 @@ function rebuildRelationship() {
   relationshipGroup = makeRelationshipGroup(chartData, natalGates, activeTransitSnapshot);
   chartRoot.add(relationshipGroup);
   relationshipGroup.visible = document.querySelector('#showBridges').checked;
-  planeGroups.daniel.visible = comparisonPair ? comparisonPair.includes('daniel') : document.querySelector('#showDaniel').checked;
-  planeGroups.camille.visible = comparisonPair ? comparisonPair.includes('camille') : document.querySelector('#showCamille').checked;
+  planeGroups.daniel.visible = document.querySelector('#showDaniel').checked;
+  planeGroups.camille.visible = document.querySelector('#showCamille').checked;
   frontFamilyReading();
-  const comparisonNote = comparisonPair
-    ? ` ${window.hdChartNames?.[comparisonPair[0]] || comparisonPair[0]} is overlapped with ${window.hdChartNames?.[comparisonPair[1]] || comparisonPair[1]}.`
-    : '';
-  setStatus(`${relationshipGroup.userData.bridgeCount} relationship channel bridge${relationshipGroup.userData.bridgeCount === 1 ? '' : 's'} shown across the family.${comparisonNote}`);
+  setStatus(`${relationshipGroup.userData.bridgeCount} relationship channel bridge${relationshipGroup.userData.bridgeCount === 1 ? '' : 's'} shown across the family.`);
 }
 
 window.addEventListener('castalia-family-children-updated', event => {
   familyChildren = Array.isArray(event.detail) ? event.detail : [];
   familyChildren.forEach((child, index) => { window.hdChartNames[child.id] = child.name || `Child ${index + 1}`; });
-    updateComparisonOptions();
   if (sourceDocument && loader) { rebuildRelationship(); resize(); }
 });
 
@@ -1165,29 +1117,6 @@ function setSeparation(value) {
     resize();
   }
 }
-document.querySelector('#overlapChildButton').addEventListener('click', () => {
-  const first = comparisonBaseSelect.value;
-  const second = comparisonOverlaySelect.value;
-  if (!first || !second || first === second) {
-    setStatus('Choose two different charts to compare.');
-    return;
-  }
-  comparisonPair = [first, second];
-  updateComparisonOptions();
-  pauseAutoRotate();
-  childAlignmentTurn = Math.abs(familyAzimuth) > 0.001
-    ? { from: familyAzimuth, started: performance.now(), duration: 900 }
-    : null;
-  orient('front');
-});
-document.querySelector('#familyLayoutButton').addEventListener('click', () => {
-  childAlignmentTurn = null;
-  comparisonPair = null;
-  updateComparisonOptions();
-  familyAzimuth = 0;
-  chartRoot.rotation.y = 0;
-  orient('front');
-});
 function orient(mode) {
   exactFrontAlignment = mode !== 'edge';
   if (sourceDocument) rebuildRelationship();
@@ -1350,7 +1279,6 @@ async function init() {
     loader = new SVGLoader();
     if (Array.isArray(window.hdRelationshipChildren)) familyChildren = window.hdRelationshipChildren;
     familyChildren.forEach((child, index) => { window.hdChartNames[child.id] = child.name || `Child ${index + 1}`; });
-    updateComparisonOptions();
     for (const [person, selector] of [['daniel', '.person--daniel'], ['camille', '.person--camille']]) {
       const active = [...sourceDocument.querySelectorAll(`${selector} .gate[data-state="closed"]`)].map(g => +g.dataset.gate);
       document.querySelector(person === 'daniel' ? '#danielGates' : '#camilleGates').value = active.join(', ');
@@ -1371,11 +1299,11 @@ document.querySelector('#separation').addEventListener('input', e => setSeparati
 for (const selector of ['#danielGates', '#camilleGates']) document.querySelector(selector).addEventListener('input', () => { clearTimeout(rebuildTimer); rebuildTimer = setTimeout(rebuildRelationship, 220); });
 document.querySelector('#showBridges').addEventListener('change', e => { if (relationshipGroup) relationshipGroup.visible = e.target.checked; });
 document.querySelector('#showDaniel').addEventListener('change', e => {
-  if (planeGroups.daniel) planeGroups.daniel.visible = comparisonPair ? comparisonPair.includes('daniel') : e.target.checked;
+  if (planeGroups.daniel) planeGroups.daniel.visible = e.target.checked;
   refreshFrontFamilyReading();
 });
 document.querySelector('#showCamille').addEventListener('change', e => {
-  if (planeGroups.camille) planeGroups.camille.visible = comparisonPair ? comparisonPair.includes('camille') : e.target.checked;
+  if (planeGroups.camille) planeGroups.camille.visible = e.target.checked;
   refreshFrontFamilyReading();
 });
 transitToggle.addEventListener('change', e => {
@@ -1415,14 +1343,6 @@ function animate() {
     familyAzimuth += autoRotateSpeed * delta;
     chartRoot.rotation.y = familyAzimuth;
     refreshFrontFamilyReading();
-  }
-  if (childAlignmentTurn) {
-    const progress = THREE.MathUtils.clamp((now - childAlignmentTurn.started) / childAlignmentTurn.duration, 0, 1);
-    const eased = progress * progress * (3 - 2 * progress);
-    familyAzimuth = childAlignmentTurn.from * (1 - eased);
-    chartRoot.rotation.y = familyAzimuth;
-    refreshFrontFamilyReading();
-    if (progress === 1) childAlignmentTurn = null;
   }
   controls.update();
   const cameraOffset = camera.position.clone().sub(controls.target);
