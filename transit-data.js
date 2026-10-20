@@ -73,16 +73,18 @@
       if (!enabled || !snapshot) return;
       const gateSet = new Set(snapshot.gates);
       for (const gate of snapshot.gates) {
-        const group = svg.getElementById(`gate-${gate}`);
-        const marker = group?.querySelector('.gate-marker');
-        if (!group || !marker) continue;
-        const ring = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-        ring.setAttribute('class', 'transit-marker');
-        ring.setAttribute('cx', marker.getAttribute('cx'));
-        ring.setAttribute('cy', marker.getAttribute('cy'));
-        ring.setAttribute('r', '3.7');
-        group.appendChild(ring);
-        group.dataset.transitPlanets = snapshot.gatePlanets[gate].join(', ');
+        const groups = svg.querySelectorAll(`.gate[data-gate="${gate}"]`);
+        for (const group of groups) {
+          const marker = group.querySelector('.gate-marker');
+          if (!marker) continue;
+          const ring = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+          ring.setAttribute('class', 'transit-marker');
+          ring.setAttribute('cx', marker.getAttribute('cx'));
+          ring.setAttribute('cy', marker.getAttribute('cy'));
+          ring.setAttribute('r', '3.7');
+          group.appendChild(ring);
+          group.dataset.transitPlanets = snapshot.gatePlanets[gate].join(', ');
+        }
       }
       for (const channel of svg.querySelectorAll('.channel-group[data-from][data-to]')) {
         const from = Number(channel.dataset.from), to = Number(channel.dataset.to);

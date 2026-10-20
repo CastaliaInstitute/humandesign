@@ -435,7 +435,7 @@ function makeTransitGroup(data, snapshot) {
   group.name = 'Current Human Design transit overlay';
   const gates = new Set(snapshot.gates);
   const gatePoints = getGatePoints(data.paths);
-  const transitColor = new THREE.Color('#eab64b');
+  const transitColor = new THREE.Color('#7c3aed');
   const roadMaterial = lineMaterial(transitColor, 0.96);
   const ringMaterial = new THREE.MeshBasicMaterial({ color: transitColor, transparent: true, opacity: 0.98, side: THREE.DoubleSide, depthWrite: false, toneMapped: false });
   for (const path of data.paths) {
@@ -459,7 +459,7 @@ function makeTransitGroup(data, snapshot) {
     const road = tubeFromPoints(points, 1.35, roadMaterial, 4.5);
     if (road) { Object.assign(road.userData, hover); group.add(road); }
     const flowCurve = new THREE.CatmullRomCurve3(points.map(point => new THREE.Vector3(point.x, point.y, 5.2)), false, 'centripetal');
-    addFlowMotion(group, flowCurve, '#fff3bf', hover);
+    addFlowMotion(group, flowCurve, '#c4b5fd', hover);
   }
   for (const gate of gates) {
     const point = gatePoints.get(gate);
@@ -472,6 +472,10 @@ function makeTransitGroup(data, snapshot) {
       `Current planetary activations: ${(snapshot.gatePlanets[gate] || []).join(', ') || 'transit'}. This is a temporary sky activation, separate from either natal chart. ${snapshot.source}.`
     ));
     group.add(ring);
+    const core = new THREE.Mesh(new THREE.SphereGeometry(1.35, 10, 8), new THREE.MeshBasicMaterial({ color: transitColor, transparent: true, opacity: 0.9, depthWrite: false, toneMapped: false }));
+    core.position.copy(ring.position);
+    Object.assign(core.userData, ring.userData);
+    group.add(core);
     const hit = new THREE.Mesh(new THREE.SphereGeometry(4.6, 10, 8), new THREE.MeshBasicMaterial({ colorWrite: false, depthWrite: false }));
     hit.position.copy(ring.position);
     Object.assign(hit.userData, ring.userData);
