@@ -128,6 +128,76 @@ function appendPersonColoredText(element, text, people, personName) {
   }
   element.append(document.createTextNode(text.slice(cursor)));
 }
+function appendInteractiveReadingText(element, text, people, personName) {
+  element.replaceChildren();
+  const channelIds = new Set([...sourceDocument.querySelectorAll('.channel-group[data-from][data-to]')].map(channel => {
+    const a = +channel.dataset.from, b = +channel.dataset.to;
+    return `${Math.min(a, b)}-${Math.max(a, b)}`;
+  }));
+  const matches = [];
+  const channelPattern = /\b(?:channel\s+)?(\d{1,2})\s*[–-]\s*(\d{1,2})(?:\s+channel)?\b/gi;
+  for (const match of text.matchAll(channelPattern)) {
+    const a = +match[1], b = +match[2];
+    const id = `${Math.min(a, b)}-${Math.max(a, b)}`;
+    if (channelIds.has(id)) matches.push({ start: match.index, end: match.index + match[0].length, kind: 'channel', id, label: match[0] });
+  }
+  const gatePattern = /\b(gates?)\s+(\d{1,2}(?:(?:\s*,\s*|\s+and\s+)\d{1,2})*)/gi;
+  for (const match of text.matchAll(gatePattern)) {
+    const numbersStart = match.index + match[0].lastIndexOf(match[2]);
+    const numberPattern = /\d{1,2}/g;
+    for (const number of match[2].matchAll(numberPattern)) {
+      const gate = +number[0];
+      if (gate < 1 || gate > 64) continue;
+      matches.push({
+        start: numbersStart + number.index,
+        end: numbersStart + number.index + number[0].length,
+        kind: 'gate', id: gate, label: number[0]
+      });
+    }
+  }
+  const entries = people.map(person => ({ person, name: personName(person) }))
+    .filter(entry => entry.name)
+    .sort((a, b) => b.name.length - a.name.length);
+  const escapeRegExp = value => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  if (entries.length) {
+    const namesPattern = new RegExp(`(^|[^\\p{L}\\p{N}_])(${entries.map(entry => escapeRegExp(entry.name)).join('|')})(?=$|[^\\p{L}\\p{N}_])`, 'giu');
+    for (const match of text.matchAll(namesPattern)) {
+      const start = match.index + match[1].length;
+      matches.push({ start, end: start + match[2].length, kind: 'person', label: match[2], person: entries.find(entry => entry.name.toLocaleLowerCase() === match[2].toLocaleLowerCase())?.person });
+    }
+  }
+  matches.sort((a, b) => a.start - b.start || b.end - a.end);
+  let cursor = 0;
+  const appendPlain = plainText => {
+    if (!plainText) return;
+    const fragment = document.createElement('span');
+    appendPersonColoredText(fragment, plainText, people, personName);
+    element.append(...fragment.childNodes);
+  };
+  for (const match of matches) {
+    if (match.start < cursor) continue;
+    appendPlain(text.slice(cursor, match.start));
+    if (match.kind === 'person') {
+      const mention = document.createElement('span');
+      mention.textContent = match.label;
+      mention.style.color = chartTextColor(match.person);
+      mention.style.fontWeight = '650';
+      element.append(mention);
+    } else {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'reading-feature-link';
+      button.dataset.readingFeature = `${match.kind}:${match.id}`;
+      button.setAttribute('aria-pressed', String(selectedKey === `reading:${match.kind}:${match.id}`));
+      button.setAttribute('aria-label', `Highlight ${match.kind} ${match.id} on the BodyGraph`);
+      button.title = `Highlight ${match.kind} ${match.id} on the BodyGraph`;
+      button.textContent = match.label;
+      element.append(button);
+    }
+    cursor = match.end;
+  }
+  appendPlain(text.slice(cursor));
+}
 function cameraAzimuth() {
   const offset = camera.position.clone().sub(controls.target);
   return Math.atan2(offset.x, offset.z);
@@ -274,7 +344,7 @@ function frontFamilyReading() {
   const activations = person => window.hdNatalPlanetaryActivations?.[person] || familyChildren.find(child => child.id === person)?.activations || [];
   const personName = person => window.hdChartNames?.[person] || (person === 'daniel' ? 'Person 1' : person === 'camille' ? 'Person 2' : 'Child');
   const familyPeople = ['daniel', 'camille', ...familyChildren.map(child => child.id)];
-  const appendReadingText = (element, text) => appendPersonColoredText(element, text, familyPeople, personName);
+  const appendReadingText = (element, text) => appendInteractiveReadingText(element, text, familyPeople, personName);
   const frontName = personName(readingPerson);
   const summary = summarizeChart(gates.get(readingPerson), activations(readingPerson));
   const heading = document.querySelector('#familyReadingTitle');
@@ -1331,8 +1401,17 @@ function applyHighlight(key) {
   clearHighlight();
   if (!key) return;
   highlightedKey = key;
+  const featureMatches = featureKey => {
+    if (featureKey === key) return true;
+    const match = key.match(/^reading:(gate|channel):(.+)$/);
+    if (!match) return false;
+    if (match[1] === 'gate') return featureKey.match(/(?:^|:)gate:(\d+)$/)?.[1] === match[2];
+    const channelId = match[2];
+    const featureChannel = featureKey.match(/(?:channel:)(\d+)[–-](\d+)$/);
+    return Boolean(featureChannel && `${Math.min(+featureChannel[1], +featureChannel[2])}-${Math.max(+featureChannel[1], +featureChannel[2])}` === channelId);
+  };
   chartRoot.traverse(object => {
-    if (!object.material || object.userData.hoverKey !== key) return;
+    if (!object.material || !featureMatches(object.userData.hoverKey || '')) return;
     const original = object.material;
     const highlightedMaterials = (Array.isArray(original) ? original : [original]).map(material => {
       const copy = material.clone();
@@ -1344,6 +1423,19 @@ function applyHighlight(key) {
     highlighted.push({ mesh: object, material: original, highlightedMaterial: object.material });
   });
 }
+document.querySelector('#familyReadingBody').addEventListener('click', event => {
+  const button = event.target.closest('button[data-reading-feature]');
+  if (!button) return;
+  pauseAutoRotate();
+  const key = `reading:${button.dataset.readingFeature}`;
+  selectedKey = selectedKey === key ? null : key;
+  hoveredKey = selectedKey;
+  applyHighlight(selectedKey);
+  tip.hidden = true;
+  for (const link of document.querySelectorAll('#familyReadingBody button[data-reading-feature]')) {
+    link.setAttribute('aria-pressed', String(selectedKey === `reading:${link.dataset.readingFeature}`));
+  }
+});
 function clearHover() {
   hoveredKey = null;
   tip.hidden = true;
