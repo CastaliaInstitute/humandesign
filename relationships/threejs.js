@@ -158,10 +158,21 @@ function appendInteractiveReadingText(element, text, people, personName) {
       });
     }
   }
+  const escapeRegExp = value => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const centerAliases = Object.entries(centerDescriptions).flatMap(([id, [label]]) => [
+    { id, label },
+    ...(id === 'solar' ? [{ id, label: 'Solar Plexus' }] : []),
+    ...(id === 'ego' ? [{ id, label: 'Ego' }, { id, label: 'Heart' }] : [])
+  ]).sort((a, b) => b.label.length - a.label.length);
+  for (const { id, label } of centerAliases) {
+    const centerPattern = new RegExp(`\\b${escapeRegExp(label)}\\b`, 'gi');
+    for (const match of text.matchAll(centerPattern)) {
+      matches.push({ start: match.index, end: match.index + match[0].length, kind: 'center', id, label: match[0] });
+    }
+  }
   const entries = people.map(person => ({ person, name: personName(person) }))
     .filter(entry => entry.name)
     .sort((a, b) => b.name.length - a.name.length);
-  const escapeRegExp = value => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   if (entries.length) {
     const namesPattern = new RegExp(`(^|[^\\p{L}\\p{N}_])(${entries.map(entry => escapeRegExp(entry.name)).join('|')})(?=$|[^\\p{L}\\p{N}_])`, 'giu');
     for (const match of text.matchAll(namesPattern)) {
@@ -1129,7 +1140,7 @@ function makeRelationshipGroup(chartData, natalGates, transitSnapshot, pairs = [
   const group = new THREE.Group();
   group.name = 'Relationship-completed channels · overlapping charts';
   const gateMarkerZ = 3.3;
-  const gold = lineMaterial(new THREE.Color('#eab64b'), 0.98);
+  const relationshipTeal = lineMaterial(new THREE.Color('#238f8b'), 0.98);
   const personMaterials = new Map();
   const materialFor = person => {
     if (!personMaterials.has(person)) personMaterials.set(person, lineMaterial(chartColor(person), 0.9));
@@ -1204,14 +1215,14 @@ function makeRelationshipGroup(chartData, natalGates, transitSnapshot, pairs = [
           const spline = new THREE.CatmullRomCurve3(points, false, 'centripetal');
           const transitContributed = !natalGates[link.fromPerson].has(link.fromGate) || !natalGates[link.toPerson].has(link.toGate);
           const bridges = transitContributed
-            ? dashedTubesFromCurve(spline, 1.25, gold)
-            : [new THREE.Mesh(new THREE.TubeGeometry(spline, 96, 1.25, 6, false), gold)];
+            ? dashedTubesFromCurve(spline, 1.25, relationshipTeal)
+            : [new THREE.Mesh(new THREE.TubeGeometry(spline, 96, 1.25, 6, false), relationshipTeal)];
           for (const bridge of bridges) {
             Object.assign(bridge.userData, tip);
             group.add(bridge);
           }
-          addFlowMotion(group, spline, '#fff0b0', tip);
-          addFlowMotion(group, spline, '#39aabd', tip, true);
+          addFlowMotion(group, spline, '#8fe3d7', tip);
+          addFlowMotion(group, spline, '#66bfe2', tip, true);
           for (const [point, material] of [[link.from, link.fromMaterial], [link.to, link.toMaterial]]) {
             const bead = new THREE.Mesh(new THREE.SphereGeometry(2.3, 10, 8), material);
             bead.position.copy(point);
@@ -1506,9 +1517,13 @@ function applyHighlight(key) {
   highlightedKey = key;
   const featureMatches = featureKey => {
     if (featureKey === key) return true;
-    const match = key.match(/^reading:(gate|channel):(.+)$/);
+    const match = key.match(/^reading:(gate|channel|center):(.+)$/);
     if (!match) return false;
     if (match[1] === 'gate') return featureKey.match(/(?:^|:)gate:(\d+)$/)?.[1] === match[2];
+    if (match[1] === 'center') {
+      const centerLabel = centerDescriptions[match[2]]?.[0];
+      return Boolean(centerLabel && featureKey.toLocaleLowerCase().endsWith(`:center:${centerLabel}`.toLocaleLowerCase()));
+    }
     const channelId = match[2];
     const featureChannel = featureKey.match(/(?:channel:)(\d+)[–-](\d+)$/);
     return Boolean(featureChannel && `${Math.min(+featureChannel[1], +featureChannel[2])}-${Math.max(+featureChannel[1], +featureChannel[2])}` === channelId);
