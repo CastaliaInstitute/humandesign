@@ -52,6 +52,10 @@ function rotateFamily(step) {
 }
 const planeGroups = {};
 let relationshipGroup = null;
+let activeRelationshipPairKey = '';
+let currentChartData = null;
+let currentNatalGates = null;
+let currentTransitSnapshot = null;
 const transitGroups = {};
 const familyGroups = {};
 let familyChildren = [];
@@ -768,6 +772,45 @@ function chartPointInFamily(point, person, localDepth = 0) {
     (planeGroups[person]?.position.z || 0) + localZ
   );
 }
+function overlappingChartPairs() {
+  if (!currentNatalGates) return [];
+  chartRoot.updateMatrixWorld(true);
+  camera.updateMatrixWorld(true);
+  const candidates = Object.keys(currentNatalGates).filter(person => {
+    if (person === 'daniel') return planeGroups.daniel?.visible ?? true;
+    if (person === 'camille') return planeGroups.camille?.visible ?? true;
+    return familyGroups[person]?.visible ?? true;
+  }).map(person => {
+    const center = chartPointInFamily({ x: 194.4, y: chartViewHeight / 2 }, person);
+    const screen = camera.worldToLocal(chartRoot.localToWorld(center));
+    return { person, x: screen.x, y: screen.y };
+  });
+  const pairs = [];
+  const maxDistance = 12;
+  for (let i = 0; i < candidates.length; i++) {
+    for (let j = i + 1; j < candidates.length; j++) {
+      const a = candidates[i], b = candidates[j];
+      if (Math.hypot(a.x - b.x, a.y - b.y) <= maxDistance) pairs.push([a.person, b.person]);
+    }
+  }
+  return pairs;
+}
+function refreshRelationshipPairing() {
+  if (!currentChartData || !currentNatalGates) return;
+  const pairs = overlappingChartPairs();
+  const key = pairs.map(pair => pair.join(':')).sort().join('|');
+  if (key === activeRelationshipPairKey) return;
+  activeRelationshipPairKey = key;
+  releaseGroup(relationshipGroup);
+  for (let i = flowAnimations.length - 1; i >= 0; i--) {
+    if (!flowAnimations[i].bead.parent) flowAnimations.splice(i, 1);
+  }
+  relationshipGroup = makeRelationshipGroup(currentChartData, currentNatalGates, currentTransitSnapshot, pairs);
+  chartRoot.add(relationshipGroup);
+  relationshipGroup.visible = document.querySelector('#showBridges').checked;
+  const names = pairs.map(pair => pair.map(person => window.hdChartNames?.[person] || (person === 'daniel' ? 'Person 1' : person === 'camille' ? 'Person 2' : 'Child')).join('–'));
+  setStatus(`${relationshipGroup.userData.bridgeCount} relationship channel bridge${relationshipGroup.userData.bridgeCount === 1 ? '' : 's'} between overlapping charts${names.length ? ` (${names.join(', ')})` : ''}.`);
+}
 function relationshipLinkSpecs(a, b, personA, personB, natalGates, transitGates) {
   const gatesA = natalGates[personA] || new Set();
   const gatesB = natalGates[personB] || new Set();
@@ -789,9 +832,9 @@ function snapshotPlanetNames(snapshot, gate) {
   const planets = snapshot?.gatePlanets?.[gate] || [];
   return planets.length ? ` (${planets.join(', ')})` : '';
 }
-function makeRelationshipGroup(chartData, natalGates, transitSnapshot) {
+function makeRelationshipGroup(chartData, natalGates, transitSnapshot, pairs = []) {
   const group = new THREE.Group();
-  group.name = 'Relationship-completed channels · all family charts';
+  group.name = 'Relationship-completed channels · overlapping charts';
   const gateMarkerZ = 3.3;
   const gold = lineMaterial(new THREE.Color('#eab64b'), 0.98);
   const personMaterials = new Map();
@@ -814,9 +857,7 @@ function makeRelationshipGroup(chartData, natalGates, transitSnapshot) {
   let bridgeCount = 0;
   chartRoot.updateMatrixWorld(true);
   const templatePaths = chartData.daniel?.paths || chartData[people[0]]?.paths || [];
-  for (let firstIndex = 0; firstIndex < people.length; firstIndex++) {
-    for (let secondIndex = firstIndex + 1; secondIndex < people.length; secondIndex++) {
-      const personA = people[firstIndex], personB = people[secondIndex];
+  for (const [personA, personB] of pairs) {
       for (const path of templatePaths) {
         const node = path.userData.node;
         const cls = node?.getAttribute('class') || '';
@@ -886,7 +927,6 @@ function makeRelationshipGroup(chartData, natalGates, transitSnapshot) {
           }
         }
       }
-    }
   }
   group.userData.bridgeCount = bridgeCount;
   return group;
@@ -964,23 +1004,24 @@ function rebuildRelationship() {
   const camilleGates = parseGateList('#camilleGates');
   const natalGates = { daniel: danielGates, camille: camilleGates };
   familyChildren.forEach(child => { natalGates[child.id] = new Set(child.gates || []); });
-  const people = Object.keys(natalGates);
   const activeTransitSnapshot = transitToggle.checked ? transitSnapshot : null;
   const sharedChannels = new Set([...sourceDocument.querySelectorAll('.channel-group[data-from][data-to]')]
     .filter(channel => danielGates.has(+channel.dataset.from) && danielGates.has(+channel.dataset.to) && camilleGates.has(+channel.dataset.from) && camilleGates.has(+channel.dataset.to))
     .map(channel => `${Math.min(+channel.dataset.from, +channel.dataset.to)}-${Math.max(+channel.dataset.from, +channel.dataset.to)}`));
   const transitGates = new Set(activeTransitSnapshot?.gates || []);
+  currentNatalGates = natalGates;
+  if (planeGroups.daniel) planeGroups.daniel.visible = document.querySelector('#showDaniel').checked;
+  if (planeGroups.camille) planeGroups.camille.visible = document.querySelector('#showCamille').checked;
+  const overlapPairs = overlappingChartPairs();
   const relationshipChannels = new Set();
   const channelElements = [...sourceDocument.querySelectorAll('.person--daniel .channel-group[data-from][data-to]')];
-  for (let i = 0; i < people.length; i++) {
-    for (let j = i + 1; j < people.length; j++) {
+  for (const [personA, personB] of overlapPairs) {
       for (const channel of channelElements) {
         const a = +channel.dataset.from, b = +channel.dataset.to;
-        if (relationshipLinkSpecs(a, b, people[i], people[j], natalGates, transitGates).length) {
+        if (relationshipLinkSpecs(a, b, personA, personB, natalGates, transitGates).length) {
           relationshipChannels.add(`${Math.min(a, b)}-${Math.max(a, b)}`);
         }
       }
-    }
   }
   const chartData = {};
   for (const person of ['daniel', 'camille']) {
@@ -1059,14 +1100,18 @@ function rebuildRelationship() {
       transitGroup.visible = transitToggle.checked;
     }
   });
+  currentChartData = chartData;
+  currentTransitSnapshot = activeTransitSnapshot;
   releaseGroup(relationshipGroup);
-  relationshipGroup = makeRelationshipGroup(chartData, natalGates, activeTransitSnapshot);
+  activeRelationshipPairKey = overlapPairs.map(pair => pair.join(':')).sort().join('|');
+  relationshipGroup = makeRelationshipGroup(chartData, natalGates, activeTransitSnapshot, overlapPairs);
   chartRoot.add(relationshipGroup);
   relationshipGroup.visible = document.querySelector('#showBridges').checked;
   planeGroups.daniel.visible = document.querySelector('#showDaniel').checked;
   planeGroups.camille.visible = document.querySelector('#showCamille').checked;
   frontFamilyReading();
-  setStatus(`${relationshipGroup.userData.bridgeCount} relationship channel bridge${relationshipGroup.userData.bridgeCount === 1 ? '' : 's'} shown across the family.`);
+  const pairNames = overlapPairs.map(pair => pair.map(person => window.hdChartNames?.[person] || (person === 'daniel' ? 'Person 1' : person === 'camille' ? 'Person 2' : 'Child')).join('–'));
+  setStatus(`${relationshipGroup.userData.bridgeCount} relationship channel bridge${relationshipGroup.userData.bridgeCount === 1 ? '' : 's'} between overlapping charts${pairNames.length ? ` (${pairNames.join(', ')})` : ''}.`);
 }
 
 window.addEventListener('castalia-family-children-updated', event => {
@@ -1133,6 +1178,7 @@ function orient(mode) {
   controls.target.set(0, familyViewCenterY, 0);
   lockOrbitElevation();
   controls.update();
+  refreshRelationshipPairing();
 }
 
 const raycaster = new THREE.Raycaster();
@@ -1304,10 +1350,12 @@ for (const selector of ['#danielGates', '#camilleGates']) document.querySelector
 document.querySelector('#showBridges').addEventListener('change', e => { if (relationshipGroup) relationshipGroup.visible = e.target.checked; });
 document.querySelector('#showDaniel').addEventListener('change', e => {
   if (planeGroups.daniel) planeGroups.daniel.visible = e.target.checked;
+  refreshRelationshipPairing();
   refreshFrontFamilyReading();
 });
 document.querySelector('#showCamille').addEventListener('change', e => {
   if (planeGroups.camille) planeGroups.camille.visible = e.target.checked;
+  refreshRelationshipPairing();
   refreshFrontFamilyReading();
 });
 transitToggle.addEventListener('change', e => {
@@ -1349,6 +1397,7 @@ function animate() {
     refreshFrontFamilyReading();
   }
   controls.update();
+  refreshRelationshipPairing();
   const cameraOffset = camera.position.clone().sub(controls.target);
   const cameraAzimuth = Math.atan2(cameraOffset.x, cameraOffset.z);
   const angle = THREE.MathUtils.euclideanModulo(familyAzimuth - cameraAzimuth + Math.PI, Math.PI * 2) - Math.PI;
