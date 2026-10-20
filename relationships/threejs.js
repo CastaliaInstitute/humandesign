@@ -317,55 +317,16 @@ function offsetPathPoints(points, amount) {
   });
 }
 function hoverInfo(key, title, detail) { return { hoverKey: key, hoverTip: { title, detail } }; }
-const planetSymbols = {
-  sun: '☉', earth: '⊕', moon: '☽', mercury: '☿', venus: '♀', mars: '♂',
-  jupiter: '♃', saturn: '♄', uranus: '♅', neptune: '♆', pluto: '♇',
-  north_node: '☊', south_node: '☋'
-};
-function addPlanetIndicators(target, points, channel, gatePoints, activationsByGate, channelId, person) {
-  if (points.length < 2) return;
-  const from = +channel.dataset.from, to = +channel.dataset.to;
-  const fromPoint = gatePoints.get(from);
-  const startsAtFrom = fromPoint && Math.hypot(points[0].x - fromPoint.x, points[0].y - fromPoint.y) <= Math.hypot(points[points.length - 1].x - fromPoint.x, points[points.length - 1].y - fromPoint.y);
-  const curve = new THREE.CatmullRomCurve3(points.map(point => new THREE.Vector3(point.x, point.y, 6.1)), false, 'centripetal');
-  for (const [gate, baseT] of [[startsAtFrom === false ? to : from, 0.12], [startsAtFrom === false ? from : to, 0.88]]) {
-    const activations = activationsByGate.get(gate) || [];
-    activations.forEach((activation, index) => {
-      const typeColor = activation.type === 'design' ? '#cf2943' : '#24231f';
-      const canvas = document.createElement('canvas');
-      canvas.width = 64; canvas.height = 40;
-      const ctx = canvas.getContext('2d');
-      ctx.fillStyle = '#fffdf7';
-      ctx.beginPath(); ctx.roundRect(2, 3, 60, 34, 8); ctx.fill();
-      ctx.strokeStyle = typeColor; ctx.lineWidth = 3; ctx.stroke();
-      ctx.fillStyle = typeColor;
-      ctx.font = 'bold 25px Georgia, serif';
-      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      ctx.fillText(planetSymbols[activation.planet] || activation.planet.slice(0, 2), 32, 21);
-      const texture = new THREE.CanvasTexture(canvas);
-      texture.colorSpace = THREE.SRGBColorSpace;
-      const marker = new THREE.Sprite(new THREE.SpriteMaterial({ map: texture, transparent: true, depthWrite: false }));
-      marker.scale.set(8.4, 5.25, 1);
-      const spread = (index - (activations.length - 1) / 2) * 0.08;
-      const point = curve.getPointAt(THREE.MathUtils.clamp(baseT + spread, 0.04, 0.96));
-      const tangent = curve.getTangentAt(THREE.MathUtils.clamp(baseT + spread, 0.04, 0.96));
-      const sideOffset = index % 2 === 0 ? -2.5 : 2.5;
-      const chartOffset = person === 'daniel' ? -2.5 : person === 'camille' ? 2.5 : 0;
-      marker.position.set(point.x + chartOffset - tangent.y * sideOffset, point.y + tangent.x * sideOffset, point.z);
-      marker.renderOrder = 10;
-      const label = activation.planet.replace('_', ' ');
-      const typeLabel = activation.type === 'design' ? 'Design · red' : 'Personality · black';
-      const owner = window.hdChartNames?.[person] || (person === 'daniel' ? 'Person 1' : person === 'camille' ? 'Person 2' : 'Child');
-      Object.assign(marker.userData, hoverInfo(
-        `natal:${person}:${activation.type}:${activation.planet}:${gate}`,
-        `${owner} · ${typeLabel} · ${label} · Gate ${gate}`,
-        `${owner}: ${label} activates Gate ${gate} in the ${activation.type} chart. Shown on channel ${channelId.replace('-', '–')}.`
-      ));
-      target.add(marker);
-    });
-  }
+function activationDescription(activations = []) {
+  if (!activations.length) return '';
+  return ['personality', 'design'].map(type => {
+    const planets = [...new Set(activations.filter(item => item.type === type).map(item => item.planet.replaceAll('_', ' ')))];
+    if (!planets.length) return '';
+    const label = type === 'personality' ? 'Personality (black)' : 'Design (red)';
+    return `${label}: ${planets.join(', ')}`;
+  }).filter(Boolean).join('; ');
 }
-function describePathFeature(node, person) {
+function describePathFeature(node, person, activationsByGate) {
   const owner = window.hdChartNames?.[person] || (person === 'daniel' ? 'Person 1' : 'Person 2');
   const gate = gateGroup(node);
   const channel = channelGroup(node);
@@ -376,7 +337,9 @@ function describePathFeature(node, person) {
     const active = gate.dataset.state === 'closed';
     const key = `${person}:gate:${number}`;
     const meaning = gateDescriptions.get(number);
-    return hoverInfo(key, `Gate ${number}${meaning?.name ? ` · ${meaning.name}` : ''}`, `${meaning?.description || 'A gate is one activation point in a channel.'} ${owner} · ${centerName} center · ${active ? 'active' : 'open'}.`);
+    const activation = activationDescription(activationsByGate.get(number));
+    const activationNote = activation ? ` Planetary activations: ${activation}.` : '';
+    return hoverInfo(key, `Gate ${number}${meaning?.name ? ` · ${meaning.name}` : ''}`, `${meaning?.description || 'A gate is one activation point in a channel.'} ${owner} · ${centerName} center · ${active ? 'active' : 'open'}.${activationNote}`);
   }
   if (channel) {
     const channelId = `${Math.min(+channel.dataset.from, +channel.dataset.to)}-${Math.max(+channel.dataset.from, +channel.dataset.to)}`;
@@ -385,7 +348,14 @@ function describePathFeature(node, person) {
     const complete = channel.dataset.defined === 'true';
     const key = `${person}:channel:${label}`;
     const meaning = channelDescriptions.get(channelId);
-    return hoverInfo(key, `Channel ${label}${meaning?.name ? ` · ${meaning.name}` : ''}`, `${meaning?.description || `${owner} · ${circuit} circuit.`} ${owner} · ${circuit} circuit · ${complete ? 'complete' : 'open'}.`);
+    const fromActivations = activationDescription(activationsByGate.get(+channel.dataset.from));
+    const toActivations = activationDescription(activationsByGate.get(+channel.dataset.to));
+    const gateActivations = [
+      fromActivations && `Gate ${channel.dataset.from}: ${fromActivations}`,
+      toActivations && `Gate ${channel.dataset.to}: ${toActivations}`
+    ].filter(Boolean);
+    const activationNote = gateActivations.length ? ` Planetary activations · ${gateActivations.join(' · ')}.` : '';
+    return hoverInfo(key, `Channel ${label}${meaning?.name ? ` · ${meaning.name}` : ''}`, `${meaning?.description || `${owner} · ${circuit} circuit.`} ${owner} · ${circuit} circuit · ${complete ? 'complete' : 'open'}.${activationNote}`);
   }
   if (center) {
     const centerId = center.dataset.center || 'body';
@@ -439,7 +409,7 @@ function makePlaneGroup(paths, person, sharedChannels, relationshipChannels, opt
     const isGateMarker = cls.includes('gate-marker');
     const isCenterShape = cls.includes('center-shape');
     const channelId = channel ? `${Math.min(+channel.dataset.from, +channel.dataset.to)}-${Math.max(+channel.dataset.from, +channel.dataset.to)}` : null;
-    const hover = describePathFeature(node, person);
+    const hover = describePathFeature(node, person, activationsByGate);
     if (hover && channelId && relationshipChannels.has(channelId)) hover.hoverKey = `relationship:channel:${channelId}`;
 
     if (path.subPaths?.length && isChannel) {
@@ -480,14 +450,15 @@ function makePlaneGroup(paths, person, sharedChannels, relationshipChannels, opt
           }
         }
       }
-      if (!cls.split(/\s+/).includes('paired-rail') && path.subPaths[0]) {
-        addPlanetIndicators(group, path.subPaths[0].getPoints(48), channel, gatePoints, activationsByGate, channelId, person);
-      }
       continue;
     }
 
     if (path.subPaths?.length && (isGateMarker || isCenterShape)) {
-      const fillColor = isGateMarker ? (gateActive ? color : pale) : (centerActive ? color : pale);
+      const gateActivations = gate ? (activationsByGate.get(+gate.dataset.gate) || []) : [];
+      const gateFillColor = gateActivations.some(item => item.type === 'design')
+        ? '#cf2943'
+        : gateActivations.some(item => item.type === 'personality') ? '#24231f' : color;
+      const fillColor = isGateMarker ? (gateActive ? gateFillColor : pale) : (centerActive ? color : pale);
       const fillMat = new THREE.MeshBasicMaterial({ color: fillColor, transparent: true, opacity: isCenterShape ? (centerActive ? (exactFrontAlignment ? 0.3 : 0.42) : 0.48) : (exactFrontAlignment ? 0.64 : 0.94), side: THREE.DoubleSide, depthWrite: false });
       const outlineActive = isCenterShape ? centerActive : gateActive;
       const outlineMat = lineMaterial(color, exactFrontAlignment ? (outlineActive ? 0.92 : 0.56) : (outlineActive ? 1 : 0.76));
