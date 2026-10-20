@@ -1438,6 +1438,12 @@ window.addEventListener('keydown', event => {
     event.preventDefault();
     return;
   }
+  if (event.key === '[' || event.key === ']') {
+    pauseAutoRotate();
+    event.preventDefault();
+    rotateFamily(Math.PI / 4 * (event.key === ']' ? 1 : -1));
+    return;
+  }
   if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
   pauseAutoRotate();
   event.preventDefault();
