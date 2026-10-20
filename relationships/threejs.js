@@ -92,6 +92,10 @@ function chartColor(person) {
   const childIndex = Math.max(0, familyChildren.findIndex(child => child.id === person));
   return childPalette[childIndex % childPalette.length];
 }
+function chartTextColor(person) {
+  // Darken the chart swatch for readable text on the light reading panel.
+  return chartColor(person).clone().lerp(new THREE.Color('#292820'), 0.36).getStyle();
+}
 function cameraAzimuth() {
   const offset = camera.position.clone().sub(controls.target);
   return Math.atan2(offset.x, offset.z);
@@ -231,6 +235,7 @@ function frontFamilyReading() {
   if (!root || !sourceDocument) return;
   const readingPerson = personCurrentlyInFront();
   readingFrontPerson = readingPerson;
+  document.querySelector('#familyReading')?.style.setProperty('--chart-text-color', chartTextColor(readingPerson));
   root.replaceChildren();
   const peers = ['daniel', 'camille', ...familyChildren.map(child => child.id)].filter(person => person !== readingPerson);
   const gates = new Map([[readingPerson, gatesFor(readingPerson)]]);
@@ -240,7 +245,7 @@ function frontFamilyReading() {
   const frontName = personName(readingPerson);
   const summary = summarizeChart(gates.get(readingPerson), activations(readingPerson));
   const heading = document.querySelector('#familyReadingTitle');
-  if (heading) heading.textContent = `${frontName} · chart reading`;
+  if (heading) heading.textContent = frontName;
   if (!summary) return;
 
   const profiles = [
