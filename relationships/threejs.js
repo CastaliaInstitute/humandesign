@@ -84,7 +84,7 @@ let autoRotate = !reduceMotion;
 const autoRotateSpeed = 0.035; // radians per second; one slow turn takes about three minutes
 const colors = { daniel: new THREE.Color('#087fa5'), camille: new THREE.Color('#cf4f79') };
 const childPalette = ['#488f73', '#b67a37', '#7864a6', '#518a9d'].map(color => new THREE.Color(color));
-const familyLayout = { parentScale: parentChartScale, childScale: 0.42, parentRadius: 0 };
+const familyLayout = { parentScale: parentChartScale, childScale: parentChartScale, parentRadius: 0 };
 const overlapDepthOffset = 0.18;
 function childPlaneRadius() {
   return Number(document.querySelector('#separation').value) / 2;
