@@ -74,21 +74,25 @@
     while (cursor < limit) {
       const data = await monthData(cursor);
       const values = data.bodies?.[planet === 'earth' ? 'sun' : planet];
-      if (!values?.length || !Number.isFinite(data.step) || data.step <= 0) return null;
+      if (!values?.length || !Number.isFinite(data.t0) || !Number.isFinite(data.step) || data.step <= 0) {
+        throw new Error(`Transit ephemeris is incomplete for ${planet}.`);
+      }
       const monthEnd = data.t0 + (values.length - 1) * data.step;
       let previousTime = Math.max(cursor, data.t0);
+      if (previousTime > monthEnd) throw new Error(`Transit ephemeris does not cover ${planet} after ${new Date(cursor * 1000).toISOString()}.`);
       const firstIndex = Math.max(1, Math.floor((previousTime - data.t0) / data.step) + 1);
       for (let index = firstIndex; index < values.length; index++) {
         const sampleTime = data.t0 + index * data.step;
         if (sampleTime > limit) return null;
         const longitude = longitudeAt(data, planet, sampleTime);
-        if (longitude == null) return null;
+        if (longitude == null) throw new Error(`Transit longitude is missing for ${planet}.`);
         if (gateAt(longitude) !== currentGate) {
           let low = previousTime, high = sampleTime;
           for (let attempt = 0; attempt < 12; attempt++) {
             const middle = (low + high) / 2;
             const middleLongitude = longitudeAt(data, planet, middle);
-            if (middleLongitude == null || gateAt(middleLongitude) !== currentGate) high = middle;
+            if (middleLongitude == null) throw new Error(`Transit longitude is missing for ${planet}.`);
+            if (gateAt(middleLongitude) !== currentGate) high = middle;
             else low = middle;
           }
           return high;
@@ -107,7 +111,13 @@
       if (gate == null) return { planet: name, gate: null, exitsAt: null };
       try {
         const exitsAt = await nextGateChange(planet, snapshot.epoch, Number(gate), maxDays);
-        return { planet: name, gate: Number(gate), exitsAt: exitsAt == null ? null : new Date(exitsAt * 1000).toISOString(), windowDays: maxDays };
+        return {
+          planet: name,
+          gate: Number(gate),
+          exitsAt: exitsAt == null ? null : new Date(exitsAt * 1000).toISOString(),
+          beyondWindow: exitsAt == null,
+          windowDays: maxDays
+        };
       } catch (error) {
         console.warn(`Could not estimate ${name} transit duration:`, error);
         return { planet: name, gate: Number(gate), exitsAt: null, windowDays: maxDays, unavailable: true };

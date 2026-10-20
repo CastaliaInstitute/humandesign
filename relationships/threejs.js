@@ -40,6 +40,7 @@ const transitGroups = {};
 const familyGroups = {};
 let familyChildren = [];
 let transitSnapshot = null;
+let transitDurationEstimates = [];
 const transitToggle = document.querySelector('#showTransits');
 try {
   transitToggle.checked = localStorage.getItem('castalia-hd-show-transits') !== 'false';
@@ -128,6 +129,20 @@ function summarizeChart(gates, activations) {
     label: `${profile ? `${profile} · ` : ''}${authority} ${type}`
   };
 }
+function transitGateWindow(gate) {
+  const entries = transitDurationEstimates.filter(item => item.gate === gate);
+  if (!entries.length) return 'end estimate unavailable';
+  if (entries.some(item => item.unavailable)) return 'end estimate unavailable';
+  if (entries.some(item => item.beyondWindow)) return 'still active beyond the eight-month estimate window';
+  if (entries.some(item => !item.exitsAt)) return 'end estimate unavailable';
+  const lastExit = Math.max(...entries.map(item => new Date(item.exitsAt).getTime()));
+  const date = new Date(lastExit);
+  const formatted = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' }).format(date);
+  return `expected through about ${formatted}`;
+}
+function transitPlanetNames(gate) {
+  return transitSnapshot?.gatePlanets?.[gate]?.join(', ') || 'current transit';
+}
 function frontFamilyReading() {
   const root = document.querySelector('#familyReadingBody');
   if (!root || !sourceDocument) return;
@@ -158,11 +173,42 @@ function frontFamilyReading() {
   intro.textContent = `In front: ${frontName} · ${summary.label}. Human Design strategy: ${summary.strategy}. Defined centers: ${centerNames.join(', ') || 'none'}; defined channels: ${summary.definedChannels.length}.`;
   root.append(intro);
 
+  const natalFrontGates = gates.get(frontPerson);
+  const transitGates = new Set(transitSnapshot?.gates || []);
+  const transitOnlyGates = [...transitGates].filter(gate => !natalFrontGates.has(gate));
+  const transitChannels = [];
   const channels = [...sourceDocument.querySelectorAll('.person--daniel .channel-group[data-from][data-to]')].map(channel => {
     const from = +channel.dataset.from, to = +channel.dataset.to;
     const id = `${Math.min(from, to)}-${Math.max(from, to)}`;
     return { id, from, to, label: id.replace('-', '–'), reading: relationshipChannelReadings[id] || channelDescriptions.get(id) };
   });
+  if (transitToggle.checked && transitSnapshot) {
+    const combined = new Set([...natalFrontGates, ...transitGates]);
+    const combinedSummary = summarizeChart(combined, activations(frontPerson));
+    const temporaryCenters = (combinedSummary?.definedCenters || []).filter(center => !summary.definedCenters.includes(center));
+    for (const channel of channels) {
+      if (!combined.has(channel.from) || !combined.has(channel.to) || summary.definedChannels.includes(channel.id)) continue;
+      const temporaryGates = [channel.from, channel.to].filter(gate => transitGates.has(gate) && !natalFrontGates.has(gate));
+      if (!temporaryGates.length) continue;
+      transitChannels.push({ ...channel, temporaryGates });
+    }
+    const transitSection = document.createElement('p');
+    const asOf = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(transitSnapshot.epoch * 1000));
+    if (!transitOnlyGates.length && !transitChannels.length) {
+      transitSection.textContent = `Transit snapshot as of ${asOf}: no new gates or channels are added to ${frontName}'s natal chart.`;
+    } else {
+      const gateDetails = transitOnlyGates.map(gate => `Gate ${gate} (${transitPlanetNames(gate)}) ${transitGateWindow(gate)}`);
+      const channelDetails = transitChannels.map(channel => {
+        const names = channel.reading?.name ? ` · ${channel.reading.name}` : '';
+        const bounds = channel.temporaryGates.map(gate => `Gate ${gate} ${transitGateWindow(gate)}`).join('; ');
+        return `Channel ${channel.label}${names} is temporarily complete (${bounds})`;
+      });
+      const centers = temporaryCenters.length ? ` The composite temporarily defines ${temporaryCenters.map(center => centerDescriptions[center]?.[0] || center).join(', ')}.` : '';
+      transitSection.textContent = `Transit deltas for ${frontName} as of ${asOf}: ${[...gateDetails, ...channelDetails].join('. ')}.${centers}`;
+    }
+    root.append(transitSection);
+  }
+
   for (const peer of peers) {
     const frontGates = gates.get(frontPerson), peerGates = gates.get(peer);
     const peerSummary = summarizeChart(peerGates, activations(peer));
@@ -189,11 +235,37 @@ function frontFamilyReading() {
     const centerName = center => centerDescriptions[center]?.[0] || center;
     if (peerToFront.length) facts.push(`conditioning lens: ${peerName(peer)} has defined ${peerToFront.map(centerName).join(', ')} center${peerToFront.length === 1 ? '' : 's'} where ${frontName}'s are not defined`);
     if (frontToPeer.length) facts.push(`${frontName} has defined ${frontToPeer.map(centerName).join(', ')} center${frontToPeer.length === 1 ? '' : 's'} where ${peerName(peer)}'s are not defined`);
+    if (transitToggle.checked && transitSnapshot) {
+      const peerActive = new Set([...peerGates, ...transitGates]);
+      const temporaryConnections = channels.flatMap(channel => {
+        if (frontGates.has(channel.from) && frontGates.has(channel.to) || peerGates.has(channel.from) && peerGates.has(channel.to)) return [];
+        const links = [];
+        if (frontGates.has(channel.from) && peerActive.has(channel.to) || transitGates.has(channel.from) && peerActive.has(channel.to)) links.push({ frontGate: channel.from, peerGate: channel.to });
+        if (frontGates.has(channel.to) && peerActive.has(channel.from) || transitGates.has(channel.to) && peerActive.has(channel.from)) links.push({ frontGate: channel.to, peerGate: channel.from });
+        return links.filter(link => {
+          const temporaryGates = [
+            ...(!frontGates.has(link.frontGate) && transitGates.has(link.frontGate) ? [link.frontGate] : []),
+            ...(!peerGates.has(link.peerGate) && transitGates.has(link.peerGate) ? [link.peerGate] : [])
+          ];
+          const hasNatalContribution = frontGates.has(link.frontGate) || peerGates.has(link.peerGate);
+          if (!temporaryGates.length || !hasNatalContribution) return false;
+          link.temporaryGates = temporaryGates;
+          return true;
+        }).map(link => ({ channel, link }));
+      });
+      if (temporaryConnections.length) {
+        const connectionText = temporaryConnections.map(({ channel, link }) => {
+          const gatesText = link.temporaryGates.map(gate => `Gate ${gate} (${transitPlanetNames(gate)}) ${transitGateWindow(gate)}`).join('; ');
+          return `${channel.label}${channel.reading?.name ? ` ${channel.reading.name}` : ''} is temporarily completed across the charts through ${gatesText}`;
+        });
+        facts.push(`current transit connection: ${connectionText.join('; ')}`);
+      }
+    }
     item.textContent = `With ${peerName(peer)}: ${facts.join('; ')}.`;
     root.append(item);
   }
   const note = document.createElement('small');
-  note.textContent = 'A Human Design parenting lens: use strategy and center contrasts as questions for reflection, not fixed claims about a person. Current transits are excluded; this is not a compatibility verdict.';
+  note.textContent = 'A Human Design parenting lens: use strategy and center contrasts as questions for reflection, not fixed claims about a person. Transit end windows are ephemeris estimates and may change; this is not a compatibility verdict.';
   root.append(note);
 }
 const pale = new THREE.Color('#fffcf5');
@@ -905,6 +977,12 @@ async function refreshTransits() {
   const status = document.querySelector('#transitStatus');
   try {
     transitSnapshot = await window.CastaliaHumanDesignTransit.currentSnapshot();
+    try {
+      transitDurationEstimates = await window.CastaliaHumanDesignTransit.estimateDurations(transitSnapshot, 240);
+    } catch (error) {
+      transitDurationEstimates = [];
+      console.warn('Transit duration estimates are unavailable:', error);
+    }
     const time = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(transitSnapshot.epoch * 1000));
     status.textContent = `As of ${time} · ${transitSnapshot.source}; Sun through Saturn + Earth. Applied to both charts; channel overlays combine natal and transit gates.`;
     if (sourceDocument && loader) rebuildRelationship();
@@ -1119,6 +1197,7 @@ document.querySelector('#showCamille').addEventListener('change', e => {
 });
 transitToggle.addEventListener('change', e => {
   for (const group of Object.values(transitGroups)) group.visible = e.target.checked;
+  frontFamilyReading();
   try { localStorage.setItem('castalia-hd-show-transits', String(e.target.checked)); }
   catch (error) { console.warn('Could not save transit visibility:', error); }
 });
