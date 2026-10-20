@@ -375,6 +375,10 @@ function makeRelationshipGroup(danielData, camilleData, danielGates, camilleGate
   const half = Number(separation) / 2;
   const danielZ = frontPerson === 'daniel' ? half : -half;
   const camilleZ = -danielZ;
+  // Gate markers are drawn at local z=3.3 in each plane. Preserve that same
+  // local depth for bridge endpoints on both charts, regardless of which
+  // plane is closer to the camera.
+  const gateMarkerZ = 3.3;
   const gold = lineMaterial(new THREE.Color('#eab64b'), 0.98);
   const blue = lineMaterial(colors.daniel, 0.9);
   const pink = lineMaterial(colors.camille, 0.9);
@@ -407,8 +411,8 @@ function makeRelationshipGroup(danielData, camilleData, danielGates, camilleGate
     const title = `Relationship channel ${a}–${b}${reading?.name ? ` · ${reading.name}` : ''}`;
     const tip = hoverInfo(`relationship:channel:${channelId}`, title, detail);
     const links = [];
-    if (dA && cB) links.push({ from: gatePointsC.get(a), fromGate: a, fromZ: camilleZ + Math.sign(camilleZ) * 3.3, fromMaterial: pink, to: gatePointsD.get(b), toGate: b, toZ: danielZ + Math.sign(danielZ) * 3.3, toMaterial: blue });
-    if (cA && dB) links.push({ from: gatePointsD.get(a), fromGate: a, fromZ: danielZ + Math.sign(danielZ) * 3.3, fromMaterial: blue, to: gatePointsC.get(b), toGate: b, toZ: camilleZ + Math.sign(camilleZ) * 3.3, toMaterial: pink });
+    if (dA && cB) links.push({ from: gatePointsC.get(a), fromGate: a, fromZ: camilleZ + gateMarkerZ, fromMaterial: pink, to: gatePointsD.get(b), toGate: b, toZ: danielZ + gateMarkerZ, toMaterial: blue });
+    if (cA && dB) links.push({ from: gatePointsD.get(a), fromGate: a, fromZ: danielZ + gateMarkerZ, fromMaterial: blue, to: gatePointsC.get(b), toGate: b, toZ: camilleZ + gateMarkerZ, toMaterial: pink });
     const sourceStart = gatePointsD.get(a);
     const sourceEnd = gatePointsD.get(b);
     for (const link of links) {
