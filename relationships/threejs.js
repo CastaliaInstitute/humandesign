@@ -1099,12 +1099,14 @@ function resize() {
   renderer.setSize(rect.width, rect.height, false);
   const aspect = rect.width / rect.height;
   const furthestChild = childPlaneRadius();
-  const halfWidth = Math.max(furthestChild + 194.4 * familyLayout.childScale + 35, 194.4 * familyLayout.parentScale + 35, 165);
-  const halfHeight = Math.max(chartViewHeight * familyLayout.parentScale / 2 + 35, chartViewHeight * familyLayout.childScale / 2 + 35, halfWidth / aspect);
+  const chartHalfWidth = 194.4 * familyLayout.parentScale;
+  const halfWidth = Math.hypot(furthestChild, chartHalfWidth) + 16;
+  const halfHeight = Math.max(chartViewHeight * familyLayout.parentScale / 2 + 20, halfWidth / aspect);
   camera.left = -halfWidth;
   camera.right = halfWidth;
   camera.top = halfHeight;
   camera.bottom = -halfHeight;
+  camera.zoom = 1.12;
   camera.updateProjectionMatrix();
 }
 function setSeparation(value) {
@@ -1124,6 +1126,8 @@ function orient(mode) {
   controls.minPolarAngle = 0;
   controls.maxPolarAngle = Math.PI;
   controls.reset();
+  camera.zoom = 1.12;
+  camera.updateProjectionMatrix();
   if (mode === 'edge') camera.position.set(800, familyViewCenterY, 0.01);
   else camera.position.set(0, familyViewCenterY, 820);
   controls.target.set(0, familyViewCenterY, 0);
