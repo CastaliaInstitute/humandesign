@@ -174,6 +174,49 @@ async function publishChildren(profiles) {
   window.hdRelationshipChildren = children.filter(Boolean);
   window.dispatchEvent(new CustomEvent('castalia-family-children-updated', { detail: window.hdRelationshipChildren }));
 }
+// Public sample charts publish the calculated gates, not the children's birth records.
+const publicExampleChildren = [
+  {
+    id: 'child-1', name: 'Aleia',
+    gates: [1,2,4,6,7,8,13,16,22,23,25,31,36,41,42,45,53],
+    activations: [
+      {planet:'sun',gate:2,line:2,type:'personality'},{planet:'earth',gate:1,line:2,type:'personality'},
+      {planet:'moon',gate:4,line:4,type:'personality'},{planet:'mercury',gate:42,line:1,type:'personality'},
+      {planet:'venus',gate:25,line:5,type:'personality'},{planet:'mars',gate:31,line:6,type:'personality'},
+      {planet:'jupiter',gate:45,line:6,type:'personality'},{planet:'saturn',gate:25,line:1,type:'personality'},
+      {planet:'uranus',gate:8,line:3,type:'personality'},{planet:'neptune',gate:25,line:4,type:'personality'},
+      {planet:'pluto',gate:41,line:2,type:'personality'},{planet:'north_node',gate:36,line:4,type:'personality'},
+      {planet:'south_node',gate:6,line:4,type:'personality'},{planet:'sun',gate:13,line:4,type:'design'},
+      {planet:'earth',gate:7,line:4,type:'design'},{planet:'moon',gate:23,line:1,type:'design'},
+      {planet:'mercury',gate:13,line:1,type:'design'},{planet:'venus',gate:25,line:3,type:'design'},
+      {planet:'mars',gate:53,line:5,type:'design'},{planet:'jupiter',gate:16,line:6,type:'design'},
+      {planet:'saturn',gate:22,line:1,type:'design'},{planet:'uranus',gate:23,line:5,type:'design'},
+      {planet:'neptune',gate:36,line:6,type:'design'},{planet:'pluto',gate:41,line:1,type:'design'},
+      {planet:'north_node',gate:36,line:6,type:'design'},{planet:'south_node',gate:6,line:6,type:'design'}
+    ]
+  },
+  {
+    id: 'child-2', name: 'Finn',
+    gates: [3,19,23,24,25,27,32,33,36,37,38,41,44,51,57,60,61,63],
+    activations: [
+      {planet:'sun',gate:24,line:4,type:'personality'},{planet:'earth',gate:44,line:4,type:'personality'},
+      {planet:'moon',gate:61,line:6,type:'personality'},{planet:'mercury',gate:51,line:2,type:'personality'},
+      {planet:'venus',gate:3,line:5,type:'personality'},{planet:'mars',gate:25,line:2,type:'personality'},
+      {planet:'jupiter',gate:23,line:6,type:'personality'},{planet:'saturn',gate:63,line:6,type:'personality'},
+      {planet:'uranus',gate:23,line:4,type:'personality'},{planet:'neptune',gate:25,line:1,type:'personality'},
+      {planet:'pluto',gate:41,line:1,type:'personality'},{planet:'north_node',gate:51,line:1,type:'personality'},
+      {planet:'south_node',gate:57,line:1,type:'personality'},{planet:'sun',gate:19,line:5,type:'design'},
+      {planet:'earth',gate:33,line:5,type:'design'},{planet:'moon',gate:32,line:6,type:'design'},
+      {planet:'mercury',gate:61,line:4,type:'design'},{planet:'venus',gate:38,line:2,type:'design'},
+      {planet:'mars',gate:61,line:1,type:'design'},{planet:'jupiter',gate:27,line:6,type:'design'},
+      {planet:'saturn',gate:37,line:1,type:'design'},{planet:'uranus',gate:23,line:1,type:'design'},
+      {planet:'neptune',gate:36,line:4,type:'design'},{planet:'pluto',gate:60,line:5,type:'design'},
+      {planet:'north_node',gate:51,line:3,type:'design'},{planet:'south_node',gate:57,line:3,type:'design'}
+    ]
+  }
+];
+window.hdRelationshipChildren = publicExampleChildren;
+window.dispatchEvent(new CustomEvent('castalia-family-children-updated', { detail: publicExampleChildren }));
 function displayProfile(profile, person) {
   names[person] = profile.name || profile.display_name || (person === 'daniel' ? 'Person 1' : 'Person 2');
   const node = document.querySelector(person === 'daniel' ? '#chartNameA' : '#chartNameB');
