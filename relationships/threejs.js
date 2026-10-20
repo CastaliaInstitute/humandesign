@@ -766,8 +766,9 @@ function makeTransitGroup(data, snapshot, natalGates, person) {
   return group;
 }
 function rebuildRelationship() {
-  if (!sourceDocument || !loader) return;
+  selectedKey = null;
   clearHover();
+  if (!sourceDocument || !loader) return;
   flowAnimations.length = 0;
   const danielGates = parseGateList('#danielGates');
   const camilleGates = parseGateList('#camilleGates');
@@ -917,40 +918,69 @@ const raycaster = new THREE.Raycaster();
 const pointer = new THREE.Vector2();
 const tip = document.querySelector('#sceneTip');
 let hoveredKey = null;
+let selectedKey = null;
+let highlightedKey = null;
 let highlighted = [];
 let touchStart = null;
-function clearHover() {
+let lastTouchSelectionAt = -Infinity;
+function clearHighlight() {
   for (const { mesh, material, highlightedMaterial } of highlighted) {
     mesh.material = material;
     if (Array.isArray(highlightedMaterial)) highlightedMaterial.forEach(item => item.dispose?.());
     else highlightedMaterial.dispose?.();
   }
   highlighted = [];
+  highlightedKey = null;
+}
+function applyHighlight(key) {
+  if (key === highlightedKey) return;
+  clearHighlight();
+  if (!key) return;
+  highlightedKey = key;
+  chartRoot.traverse(object => {
+    if (!object.material || object.userData.hoverKey !== key) return;
+    const original = object.material;
+    const highlightedMaterials = (Array.isArray(original) ? original : [original]).map(material => {
+      const copy = material.clone();
+      if (copy.color) copy.color.lerp(new THREE.Color('#ffd166'), 0.62);
+      if ('opacity' in copy && copy.transparent) copy.opacity = Math.min(1, copy.opacity + 0.28);
+      return copy;
+    });
+    object.material = Array.isArray(original) ? highlightedMaterials : highlightedMaterials[0];
+    highlighted.push({ mesh: object, material: original, highlightedMaterial: object.material });
+  });
+}
+function clearHover() {
   hoveredKey = null;
   tip.hidden = true;
   canvas.style.cursor = 'grab';
+  applyHighlight(selectedKey);
 }
 function setHover(info, key) {
   if (key !== hoveredKey) {
-    clearHover();
     hoveredKey = key;
-    chartRoot.traverse(mesh => {
-      if (!mesh.isMesh || mesh.userData.hoverKey !== key) return;
-      const original = mesh.material;
-      const brightened = (Array.isArray(original) ? original : [original]).map(material => {
-        const copy = material.clone();
-        if (copy.color) copy.color.lerp(new THREE.Color('#fff4cf'), 0.34);
-        return copy;
-      });
-      mesh.material = Array.isArray(original) ? brightened : brightened[0];
-      highlighted.push({ mesh, material: original, highlightedMaterial: mesh.material });
-    });
+    if (!selectedKey) applyHighlight(key);
   }
   tip.innerHTML = `<strong></strong><span></span>`;
   tip.querySelector('strong').textContent = info.title;
   tip.querySelector('span').textContent = info.detail;
   tip.hidden = false;
   canvas.style.cursor = 'help';
+}
+function selectFeature(info, key, clientX, clientY) {
+  selectedKey = selectedKey === key ? null : key;
+  hoveredKey = selectedKey;
+  applyHighlight(selectedKey);
+  if (selectedKey) {
+    tip.innerHTML = `<strong></strong><span></span>`;
+    tip.querySelector('strong').textContent = info.title;
+    tip.querySelector('span').textContent = info.detail;
+    tip.hidden = false;
+    canvas.style.cursor = 'help';
+    positionTip(clientX, clientY);
+  } else {
+    clearHover();
+  }
 }
 function featureAt(clientX, clientY) {
   const rect = canvas.getBoundingClientRect();
@@ -965,7 +995,7 @@ function positionTip(clientX, clientY) {
 canvas.addEventListener('pointermove', event => {
   if (event.pointerType === 'touch') return;
   const hit = featureAt(event.clientX, event.clientY);
-  if (!hit) { clearHover(); return; }
+  if (!hit) { if (!selectedKey) clearHover(); return; }
   setHover(hit.object.userData.hoverTip, hit.object.userData.hoverKey);
   positionTip(event.clientX, event.clientY);
 });
@@ -979,11 +1009,15 @@ canvas.addEventListener('pointerup', event => {
   touchStart = null;
   if (moved > 10) return;
   const hit = featureAt(event.clientX, event.clientY);
-  if (!hit) { clearHover(); return; }
-  const key = hit.object.userData.hoverKey;
-  if (key === hoveredKey && !tip.hidden) { clearHover(); return; }
-  setHover(hit.object.userData.hoverTip, key);
-  positionTip(event.clientX, event.clientY);
+  if (!hit) { selectedKey = null; clearHover(); return; }
+  lastTouchSelectionAt = performance.now();
+  selectFeature(hit.object.userData.hoverTip, hit.object.userData.hoverKey, event.clientX, event.clientY);
+});
+canvas.addEventListener('click', event => {
+  if (event.detail === 0 || performance.now() - lastTouchSelectionAt < 500) return;
+  const hit = featureAt(event.clientX, event.clientY);
+  if (hit) selectFeature(hit.object.userData.hoverTip, hit.object.userData.hoverKey, event.clientX, event.clientY);
+  else { selectedKey = null; clearHover(); }
 });
 
 function loadFeatureDescriptions(svgDocument) {
