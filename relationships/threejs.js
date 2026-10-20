@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import '../transit-data.js';
+import '../transit-data.js?family-circle-108-20261019';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { SVGLoader } from 'three/addons/loaders/SVGLoader.js';
 
@@ -44,7 +44,8 @@ const chartRoot = new THREE.Group();
 scene.add(chartRoot);
 // Rotate the family centers around their shared axis; chart planes counter-rotate
 // so every BodyGraph stays facing the camera throughout the turn.
-let familyAzimuth = 0;
+let familyAzimuth = THREE.MathUtils.degToRad(108);
+chartRoot.rotation.y = familyAzimuth;
 function rotateFamily(step) {
   familyAzimuth += step;
   chartRoot.rotation.y = familyAzimuth;
@@ -83,7 +84,7 @@ let autoRotate = !reduceMotion;
 const autoRotateSpeed = 0.035; // radians per second; one slow turn takes about three minutes
 const colors = { daniel: new THREE.Color('#087fa5'), camille: new THREE.Color('#cf4f79') };
 const childPalette = ['#488f73', '#b67a37', '#7864a6', '#518a9d'].map(color => new THREE.Color(color));
-const familyLayout = { parentScale: parentChartScale, childScale: parentChartScale, parentRadius: 50 };
+const familyLayout = { parentScale: parentChartScale, childScale: parentChartScale, parentRadius: 400 };
 function childPlaneRadius() {
   return Number(document.querySelector('#separation').value) / 2;
 }
@@ -146,10 +147,9 @@ function syncChartFacing() {
   familyChildren.forEach((child, index) => {
     const parent = familyGroups[child.id];
     if (!parent) return;
-    const flipX = index % 2 === 1;
     const chart = parent.children.find(item => item.name.includes('SVG plane'));
-    orientPlaneToCamera(chart, familyLayout.childScale, flipX, parent.rotation.y);
-    orientPlaneToCamera(transitGroups[child.id], familyLayout.childScale, flipX, parent.rotation.y);
+    orientPlaneToCamera(chart, familyLayout.childScale, false, parent.rotation.y);
+    orientPlaneToCamera(transitGroups[child.id], familyLayout.childScale, false, parent.rotation.y);
   });
 }
 function gatesFor(person) {
@@ -279,32 +279,29 @@ function frontFamilyReading() {
   if (heading) heading.textContent = frontName;
   if (!summary) return;
 
-  const profiles = [
-    'daniel', 'camille', ...familyChildren.map(child => child.id)
-  ].map(person => {
-    const chart = summarizeChart(gates.get(person) || gatesFor(person), activations(person));
-    return chart ? `${personName(person)} is a ${chart.type}${chart.profile ? ` with a ${chart.profile} profile` : ''} and ${chart.authority.toLowerCase()} authority; their strategy is to ${chart.strategy}` : '';
-  }).filter(Boolean);
-  const profileLine = document.createElement('p');
-  appendReadingText(profileLine, `Across the family, ${profiles.join('; ')}.`);
-  root.append(profileLine);
-
   const visiblePairs = overlappingChartPairs();
   const alignment = document.createElement('p');
   if (visiblePairs.length) {
-    appendReadingText(alignment, `Aligned charts: ${visiblePairs.map(pair => pair.map(personName).join(' and ')).join('; ')}.`);
+    appendReadingText(alignment, `This view brings ${visiblePairs.map(pair => pair.map(personName).join(' and ')).join('; ')} into alignment. The reading below focuses on how their defined and open centers meet.`);
   } else {
-    alignment.textContent = 'No charts are exactly aligned at this angle. Rotate by 45° to compare the next pair.';
+    alignment.textContent = 'No chart centers overlap in this view, so no pairwise energy exchange is shown. Rotate the family to bring two charts together.';
   }
   root.append(alignment);
 
-  const centerNames = summary.definedCenters.map(center => centerDescriptions[center]?.[0] || center);
+  const allCenterIds = Object.keys(centerDescriptions);
+  const describeCenters = (centers, withThemes = false) => centers.map(center => {
+    const [name, theme] = centerDescriptions[center] || [center, ''];
+    const centerTheme = theme.replace(/[.!?]+$/, '').toLowerCase();
+    return withThemes && centerTheme ? `${name} (${centerTheme})` : name;
+  });
+  const frontDefined = new Set(summary.definedCenters);
+  const frontOpen = allCenterIds.filter(center => !frontDefined.has(center));
   const intro = document.createElement('p');
   const channelNames = summary.definedChannels.map(id => {
     const reading = relationshipChannelReadings[id] || channelDescriptions.get(id);
     return `${id.replace('-', '–')}${reading?.name ? ` ${reading.name}` : ''}`;
   });
-  intro.textContent = `In front, ${frontName} is a ${summary.type}${summary.profile ? ` with a ${summary.profile} profile` : ''} and ${summary.authority.toLowerCase()} authority. This chart defines ${centerNames.length ? centerNames.join(', ') : 'no centers'}${channelNames.length ? `, including the ${channelNames.join(', ')} channel${channelNames.length === 1 ? '' : 's'}` : ''}. In Human Design, the suggested strategy is to ${summary.strategy}.`;
+  intro.textContent = `In front, ${frontName}'s ${summary.type}${summary.profile ? ` (${summary.profile})` : ''} chart has defined centers ${describeCenters([...frontDefined], true).join(', ') || 'none'}${channelNames.length ? ` through channels including ${channelNames.join(', ')}` : ''}. Its undefined (open) centers are ${describeCenters(frontOpen, true).join(', ') || 'none'}. In Human Design, definition is read as relatively consistent energy; an undefined center is more receptive to and can amplify other people's energy. Neither is better or worse, and the suggested strategy is to ${summary.strategy}.`;
   appendReadingText(intro, intro.textContent);
   root.append(intro);
 
@@ -354,26 +351,48 @@ function frontFamilyReading() {
     const sharedChannels = channels.filter(channel => gatesA.has(channel.from) && gatesA.has(channel.to) && gatesB.has(channel.from) && gatesB.has(channel.to));
     const complementary = channels.filter(channel => (gatesA.has(channel.from) && !gatesA.has(channel.to) && !gatesB.has(channel.from) && gatesB.has(channel.to)) || (gatesA.has(channel.to) && !gatesA.has(channel.from) && !gatesB.has(channel.to) && gatesB.has(channel.from)));
     const facts = [];
+    const centersA = new Set(summaryA?.definedCenters || []), centersB = new Set(summaryB?.definedCenters || []);
+    const combinedGates = new Set([...gatesA, ...gatesB]);
+    const combinedSummary = summarizeChart(combinedGates, [...activations(personA), ...activations(personB)]);
+    const combinedCenters = new Set(combinedSummary?.definedCenters || []);
+    const bothDefined = allCenterIds.filter(center => centersA.has(center) && centersB.has(center));
+    const aDefinedBOpen = allCenterIds.filter(center => centersA.has(center) && !centersB.has(center));
+    const bDefinedAOpen = allCenterIds.filter(center => centersB.has(center) && !centersA.has(center));
+    const openInBoth = allCenterIds.filter(center => !centersA.has(center) && !centersB.has(center));
+    const newlyDefinedTogether = allCenterIds.filter(center => combinedCenters.has(center) && !centersA.has(center) && !centersB.has(center));
+    const openInConnection = allCenterIds.filter(center => !combinedCenters.has(center));
+    const definedInConnection = allCenterIds.filter(center => combinedCenters.has(center));
+    facts.push(`Together, their relationship chart defines ${describeCenters(definedInConnection).join(', ') || 'no centers'}; ${openInConnection.length ? `${describeCenters(openInConnection).join(', ')} remain undefined (open)` : 'no centers remain undefined'}`);
+    if (bothDefined.length) {
+      facts.push(`Both charts define ${describeCenters(bothDefined).join(', ')}, so ${describeCenters(bothDefined).join(' and ')} are relatively consistent themes for each person and may feel mutually reinforcing`);
+    }
+    if (aDefinedBOpen.length) {
+      facts.push(`${nameA} defines ${describeCenters(aDefinedBOpen).join(', ')} while those centers are undefined (open) in ${nameB}'s chart; in Human Design terms, ${nameA} may bring a steadier expression there, while ${nameB} may be more receptive to and amplify it, with their experience varying by context`);
+    }
+    if (bDefinedAOpen.length) {
+      facts.push(`${nameB} defines ${describeCenters(bDefinedAOpen).join(', ')} while those centers are undefined (open) in ${nameA}'s chart; ${nameB} may bring a steadier expression there, while ${nameA} may be more receptive to and amplify it, with their experience varying by context`);
+    }
+    if (openInBoth.length) {
+      facts.push(`${describeCenters(openInBoth).join(', ')} are undefined (open) in both individual charts, so neither person supplies a fixed baseline in those areas`);
+    }
+    if (newlyDefinedTogether.length) {
+      facts.push(`Together, their complementary gates define ${describeCenters(newlyDefinedTogether).join(', ')} in the connection, creating a shared energy neither chart defines alone`);
+    }
+    if (openInConnection.length) {
+      facts.push(`In the combined chart, ${describeCenters(openInConnection).join(', ')} remain undefined (open) and receptive`);
+    }
     if (complementary.length) {
       const descriptions = complementary.map(channel => {
         const fromOwner = gatesA.has(channel.from) ? nameA : nameB;
         const toOwner = gatesA.has(channel.to) ? nameA : nameB;
         const title = channel.reading?.name ? ` (${channel.reading.name})` : '';
-        return `the ${channel.label}${title} channel: ${fromOwner} contributes Gate ${channel.from} and ${toOwner} contributes Gate ${channel.to}`;
+        const channelTheme = channel.reading?.description?.replace(/[.!?]+$/, '');
+        return `the ${channel.label}${title} channel links ${fromOwner}'s Gate ${channel.from} with ${toOwner}'s Gate ${channel.to}${channelTheme ? `, bringing ${channelTheme.charAt(0).toLowerCase()}${channelTheme.slice(1)}` : ''}`;
       });
-      facts.push(`Together, ${nameA} and ${nameB} complete ${descriptions.join('; ')}`);
+      facts.push(`${nameA} and ${nameB} complete ${descriptions.join('; ')}`);
     }
-    if (sharedChannels.length) facts.push(`Both charts individually define ${sharedChannels.map(channel => `${channel.label}${channel.reading?.name ? ` ${channel.reading.name}` : ''}`).join(', ')}`);
-    if (sharedGates.length) facts.push(`They both activate gates ${sharedGates.join(', ')}`);
-    const centersA = new Set(summaryA?.definedCenters || []), centersB = new Set(summaryB?.definedCenters || []);
-    const onlyA = [...centersA].filter(center => !centersB.has(center)).map(center => centerDescriptions[center]?.[0] || center);
-    const onlyB = [...centersB].filter(center => !centersA.has(center)).map(center => centerDescriptions[center]?.[0] || center);
-    if (onlyA.length || onlyB.length) {
-      const contrasts = [];
-      if (onlyA.length) contrasts.push(`${nameA}'s chart defines ${onlyA.join(', ')}, which ${nameB}'s chart leaves open`);
-      if (onlyB.length) contrasts.push(`${nameB}'s chart defines ${onlyB.join(', ')}, which ${nameA}'s chart leaves open`);
-      facts.push(`Their defined centers differ: ${contrasts.join('; ')}`);
-    }
+    if (sharedChannels.length) facts.push(`Both charts also define ${sharedChannels.map(channel => `${channel.label}${channel.reading?.name ? ` ${channel.reading.name}` : ''}`).join(', ')} individually, reinforcing a shared channel theme`);
+    if (sharedGates.length) facts.push(`They share gates ${sharedGates.join(', ')}, adding common activation themes`);
     if (transitToggle.checked && transitSnapshot) {
       const activeA = new Set([...gatesA, ...transitGates]);
       const activeB = new Set([...gatesB, ...transitGates]);
@@ -596,7 +615,7 @@ function activationDescription(activations = []) {
     return `${label}: ${planets.join(', ')}`;
   }).filter(Boolean).join('; ');
 }
-function describePathFeature(node, person, activationsByGate) {
+function describePathFeature(node, person, activationsByGate, transitSnapshot = null) {
   const owner = window.hdChartNames?.[person] || (person === 'daniel' ? 'Person 1' : 'Person 2');
   const gate = gateGroup(node);
   const channel = channelGroup(node);
@@ -605,11 +624,13 @@ function describePathFeature(node, person, activationsByGate) {
     const number = +gate.dataset.gate;
     const centerName = centerDescriptions[gate.dataset.center]?.[0] || (gate.dataset.center || 'body').replace(/-/g, ' ');
     const active = gate.dataset.state === 'closed';
+    const transitPlanets = transitSnapshot?.gatePlanets?.[number] || [];
     const key = `${person}:gate:${number}`;
     const meaning = gateDescriptions.get(number);
     const activation = activationDescription(activationsByGate.get(number));
     const activationNote = activation ? ` Planetary activations: ${activation}.` : '';
-    return hoverInfo(key, `Gate ${number}${meaning?.name ? ` · ${meaning.name}` : ''}`, `${meaning?.description || 'A gate is one activation point in a channel.'} ${owner} · ${centerName} center · ${active ? 'active' : 'open'}.${activationNote}`);
+    const transitNote = transitPlanets.length ? ` Current transit activation: ${transitPlanets.join(', ')}.` : '';
+    return hoverInfo(key, `Gate ${number}${meaning?.name ? ` · ${meaning.name}` : ''}`, `${meaning?.description || 'A gate is one activation point in a channel.'} ${owner} · ${centerName} center · natal ${active ? 'active' : 'open'}${transitPlanets.length ? '; currently activated by transit' : ''}.${activationNote}${transitNote}`);
   }
   if (channel) {
     const channelId = `${Math.min(+channel.dataset.from, +channel.dataset.to)}-${Math.max(+channel.dataset.from, +channel.dataset.to)}`;
@@ -674,6 +695,8 @@ function makePlaneGroup(paths, person, sharedChannels, relationshipChannels, opt
   const owner = options.name || window.hdChartNames?.[person] || (person === 'daniel' ? 'Person 1' : person === 'camille' ? 'Person 2' : 'Child');
   group.name = `${owner} · ${person === 'daniel' ? 'blue' : person === 'camille' ? 'pink' : 'child'} SVG plane`;
   const color = options.color || chartColor(person);
+  const transitColor = new THREE.Color('#7c3aed');
+  const transitGates = new Set(options.transitSnapshot?.gates || []);
   const planetaryActivations = options.activations || window.hdNatalPlanetaryActivations?.[person] || familyChildren.find(child => child.id === person)?.activations || [];
   const activationsByGate = new Map();
   for (const activation of planetaryActivations) {
@@ -695,7 +718,7 @@ function makePlaneGroup(paths, person, sharedChannels, relationshipChannels, opt
     const isGateMarker = cls.includes('gate-marker');
     const isCenterShape = cls.includes('center-shape');
     const channelId = channel ? `${Math.min(+channel.dataset.from, +channel.dataset.to)}-${Math.max(+channel.dataset.from, +channel.dataset.to)}` : null;
-    const hover = describePathFeature(node, person, activationsByGate);
+    const hover = describePathFeature(node, person, activationsByGate, options.transitSnapshot);
     if (hover && channelId && relationshipChannels.has(channelId)) hover.hoverKey = `relationship:channel:${channelId}`;
 
     if (path.subPaths?.length && isChannel) {
@@ -741,16 +764,18 @@ function makePlaneGroup(paths, person, sharedChannels, relationshipChannels, opt
 
     if (path.subPaths?.length && (isGateMarker || isCenterShape)) {
       const gateActivations = gate ? (activationsByGate.get(+gate.dataset.gate) || []) : [];
+      const transitActive = isGateMarker && gate && transitGates.has(+gate.dataset.gate);
       const gateFillColor = gateActivations.some(item => item.type === 'design')
         ? '#cf2943'
         : gateActivations.some(item => item.type === 'personality') ? '#24231f' : color;
-      const fillColor = isGateMarker ? (gateActive ? gateFillColor : pale) : (centerActive ? color : pale);
+      const fillColor = isGateMarker ? (transitActive ? transitColor : gateActive ? gateFillColor : pale) : (centerActive ? color : pale);
       const fillOpacity = isCenterShape
         ? (centerActive ? (exactFrontAlignment ? 0.3 : 0.42) : 0.48)
-        : gateActive ? (exactFrontAlignment ? 0.35 : 0.55) : 0;
+        : transitActive ? 0.86 : gateActive ? (exactFrontAlignment ? 0.35 : 0.55) : 0;
       const fillMat = new THREE.MeshBasicMaterial({ color: fillColor, transparent: true, opacity: fillOpacity, side: THREE.DoubleSide, depthWrite: false });
-      const outlineActive = isCenterShape ? centerActive : gateActive;
-      const outlineMat = lineMaterial(color, exactFrontAlignment ? (outlineActive ? 0.92 : 0.56) : (outlineActive ? 1 : 0.76));
+      const outlineActive = isCenterShape ? centerActive : gateActive || transitActive;
+      const outlineColor = isGateMarker && transitActive ? transitColor : color;
+      const outlineMat = lineMaterial(outlineColor, exactFrontAlignment ? (outlineActive ? 0.92 : 0.56) : (outlineActive ? 1 : 0.76));
       for (const shape of path.toShapes(true)) addShapeMesh(group, shape, fillMat, isCenterShape ? 1.2 : 3.1, hover);
       for (const subPath of path.subPaths) {
         outlineFromSubPath(group, subPath, outlineMat, isCenterShape ? 1.5 : 3.3, hover);
@@ -847,8 +872,7 @@ function chartPointInFamily(point, person, localDepth = 0) {
   } else {
     centerZ = person === frontPerson ? familyLayout.parentRadius : -familyLayout.parentRadius;
   }
-  const flipX = isChild && childIndex % 2 === 1;
-  const localX = flipX ? 194.4 * scale - point.x * scale : point.x * scale - 194.4 * scale;
+  const localX = point.x * scale - 194.4 * scale;
   const localY = -point.y * scale + chartViewHeight * scale + centerY;
   const localZ = localDepth * scale;
   const facingYaw = cameraAzimuth() - familyAzimuth;
@@ -1031,11 +1055,8 @@ function makeTransitGroup(data, snapshot, natalGates, person) {
   group.name = `Current Human Design transit overlay · ${owner}`;
   const transitGates = new Set(snapshot.gates);
   const activeGates = new Set([...natalGates, ...transitGates]);
-  const gatePoints = getGatePoints(data.paths);
-  const transitColor = new THREE.Color('#7c3aed');
   const color = chartColor(person);
   const roadMaterial = lineMaterial(color, 0.96);
-  const ringMaterial = new THREE.MeshBasicMaterial({ color: transitColor, transparent: true, opacity: 0.98, side: THREE.DoubleSide, depthWrite: false, toneMapped: false });
   for (const path of data.paths) {
     const node = path.userData.node;
     if (!node) continue;
@@ -1065,26 +1086,8 @@ function makeTransitGroup(data, snapshot, natalGates, person) {
     const flowCurve = new THREE.CatmullRomCurve3(points.map(point => new THREE.Vector3(point.x, point.y, 3.55)), false, 'centripetal');
     addFlowMotion(group, flowCurve, color.getStyle(), hover);
   }
-  for (const gate of transitGates) {
-    const point = gatePoints.get(gate);
-    if (!point) continue;
-    const ring = new THREE.Mesh(new THREE.RingGeometry(3.0, 4.2, 32), ringMaterial);
-    ring.position.set(point.x, point.y, 5.4);
-    Object.assign(ring.userData, hoverInfo(
-      `transit:gate:${gate}`,
-      `Transit gate ${gate}`,
-      `Current planetary activations: ${(snapshot.gatePlanets[gate] || []).join(', ') || 'transit'}. This is a temporary sky activation, separate from either natal chart. ${snapshot.source}.`
-    ));
-    group.add(ring);
-    const core = new THREE.Mesh(new THREE.SphereGeometry(1.35, 10, 8), new THREE.MeshBasicMaterial({ color: transitColor, transparent: true, opacity: 0.9, depthWrite: false, toneMapped: false }));
-    core.position.copy(ring.position);
-    Object.assign(core.userData, ring.userData);
-    group.add(core);
-    const hit = new THREE.Mesh(new THREE.SphereGeometry(4.6, 10, 8), new THREE.MeshBasicMaterial({ colorWrite: false, depthWrite: false }));
-    hit.position.copy(ring.position);
-    Object.assign(hit.userData, ring.userData);
-    group.add(hit);
-  }
+  // Transit gate color is applied directly to the gate marker on the natal
+  // plane. This overlay adds only the dashed temporary channels and their flow.
   group.scale.y = -1;
   group.position.set(-194.4, 194.4, 0);
   return group;
@@ -1123,7 +1126,7 @@ function rebuildRelationship() {
     chartData[person] = data;
     releaseGroup(planeGroups[person]);
     const group = makePlaneGroup(data.paths, person, sharedChannels, relationshipChannels, {
-      scale: familyLayout.parentScale
+      scale: familyLayout.parentScale, transitSnapshot: activeTransitSnapshot
     });
     group.position.z = person === frontPerson ? familyLayout.parentRadius : -familyLayout.parentRadius;
     planeGroups[person] = group;
@@ -1170,7 +1173,9 @@ function rebuildRelationship() {
     const offsetY = 0;
     const childPosition = new THREE.Group();
     const childScale = familyLayout.childScale;
-    const flipX = side < 0;
+    // Chart position determines which side of the family it occupies. Keep
+    // the SVG itself unmirrored so every child reads in the same forward view.
+    const flipX = false;
     childPosition.position.set(offsetX, offsetY, offsetZ);
     childPosition.rotation.y = Math.atan2(-offsetX, -offsetZ);
     const childGates = natalGates[child.id];
@@ -1178,7 +1183,7 @@ function rebuildRelationship() {
     chartData[child.id] = childData;
     const color = childPalette[index % childPalette.length];
     const childGroup = makePlaneGroup(childData.paths, child.id, new Set(), relationshipChannels, {
-      color, name: child.name, scale: childScale, flipX
+      color, name: child.name, scale: childScale, flipX, transitSnapshot: activeTransitSnapshot
     });
     childPosition.visible = true;
     childPosition.add(childGroup);
@@ -1241,8 +1246,11 @@ function resize() {
   const aspect = rect.width / rect.height;
   const furthestChild = childPlaneRadius();
   const chartHalfWidth = 194.4 * familyLayout.parentScale;
-  const halfWidth = Math.hypot(furthestChild, chartHalfWidth) + 16;
-  const halfHeight = Math.max(chartViewHeight * familyLayout.parentScale / 2 + 20, halfWidth / aspect);
+  // Fit the complete circular footprint (outer center plus half a chart),
+  // then compensate for the camera zoom so the wider family remains visible.
+  const framingZoom = 1.12;
+  const halfWidth = (furthestChild + chartHalfWidth + 16) * framingZoom;
+  const halfHeight = Math.max((chartViewHeight * familyLayout.parentScale / 2 + 20) * framingZoom, halfWidth / aspect);
   camera.left = -halfWidth;
   camera.right = halfWidth;
   camera.top = halfHeight;

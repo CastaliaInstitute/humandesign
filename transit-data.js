@@ -151,14 +151,7 @@
       for (const gate of snapshot.gates) {
         const groups = svg.querySelectorAll(`.gate[data-gate="${gate}"]`);
         for (const group of groups) {
-          const marker = group.querySelector('.gate-marker');
-          if (!marker) continue;
-          const ring = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-          ring.setAttribute('class', 'transit-marker');
-          ring.setAttribute('cx', marker.getAttribute('cx'));
-          ring.setAttribute('cy', marker.getAttribute('cy'));
-          ring.setAttribute('r', '3.7');
-          group.appendChild(ring);
+          if (!group.querySelector('.gate-marker')) continue;
           group.dataset.transitPlanets = snapshot.gatePlanets[gate].join(', ');
         }
       }
