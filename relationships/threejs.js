@@ -161,6 +161,25 @@ function dashedTubesFromPoints(points, radius, material, z, dashLength = 7, gapL
   }
   return meshes;
 }
+function dashedTubesFromCurve(curve, radius, material, dashLength = 7, gapLength = 4) {
+  const total = curve.getLength();
+  if (!Number.isFinite(total) || total <= 0) return [];
+  const meshes = [];
+  for (let start = 0; start < total; start += dashLength + gapLength) {
+    const end = Math.min(start + dashLength, total);
+    const divisions = Math.max(2, Math.ceil((end - start) / 1.5));
+    const points = [];
+    for (let index = 0; index <= divisions; index++) {
+      const distance = start + (end - start) * index / divisions;
+      points.push(curve.getPointAt(distance / total));
+    }
+    const segment = new THREE.CatmullRomCurve3(points, false, 'centripetal');
+    const mesh = new THREE.Mesh(new THREE.TubeGeometry(segment, Math.max(4, divisions * 2), radius, 6, false), material);
+    mesh.userData.svgPart = true;
+    meshes.push(mesh);
+  }
+  return meshes;
+}
 function addFlowMotion(target, curve, color, hover = null, reverse = false) {
   if (reduceMotion || !curve) return;
   const bead = new THREE.Group();
@@ -506,9 +525,14 @@ function makeRelationshipGroup(danielData, camilleData, danielGates, camilleGate
         );
       });
       const spline = new THREE.CatmullRomCurve3(points, false, 'centripetal');
-      const bridge = new THREE.Mesh(new THREE.TubeGeometry(spline, 96, 1.25, 6, false), gold);
-      Object.assign(bridge.userData, tip);
-      group.add(bridge);
+      const transitContributed = !natalGates[link.fromPerson].has(link.fromGate) || !natalGates[link.toPerson].has(link.toGate);
+      const bridges = transitContributed
+        ? dashedTubesFromCurve(spline, 1.25, gold)
+        : [new THREE.Mesh(new THREE.TubeGeometry(spline, 96, 1.25, 6, false), gold)];
+      for (const bridge of bridges) {
+        Object.assign(bridge.userData, tip);
+        group.add(bridge);
+      }
       addFlowMotion(group, spline, '#fff0b0', tip);
       addFlowMotion(group, spline, '#39aabd', tip, true);
       for (const [point, z, material] of [[link.from, link.fromZ, link.fromMaterial], [link.to, link.toZ, link.toMaterial]]) {
