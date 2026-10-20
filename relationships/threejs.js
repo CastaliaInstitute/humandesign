@@ -58,7 +58,7 @@ const flowAnimations = [];
 const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 const colors = { daniel: new THREE.Color('#087fa5'), camille: new THREE.Color('#cf4f79') };
 const childPalette = ['#488f73', '#b67a37', '#7864a6', '#518a9d'].map(color => new THREE.Color(color));
-const familyLayout = { parentScale: 0.62, childScale: 0.42, parentRadius: 210, childRadius: 220 };
+const familyLayout = { parentScale: 0.62, childScale: 0.42, parentRadius: 0, childRadius: 225, childSpacing: 190 };
 function chartColor(person) {
   if (colors[person]) return colors[person];
   const childIndex = Math.max(0, familyChildren.findIndex(child => child.id === person));
@@ -938,26 +938,31 @@ function rebuildRelationship() {
   }
   familyChildren.forEach((child, index) => {
     const side = index % 2 === 0 ? 1 : -1;
-    const row = Math.floor(index / 2);
-    const offsetX = side * familyLayout.childRadius;
-    const offsetY = row === 0 ? 0 : -95 * Math.ceil(row / 2) * (row % 2 ? 1 : -1);
+    const distance = familyLayout.childRadius + Math.floor(index / 2) * familyLayout.childSpacing;
+    const offsetX = side * distance;
+    const offsetY = 0;
+    const halfChild = 194.4 * familyLayout.childScale;
+    const childPosition = new THREE.Group();
+    childPosition.position.set(offsetX, halfChild + offsetY, 0);
+    childPosition.rotation.y = side > 0 ? -Math.PI / 2 : Math.PI / 2;
     const childData = loader.parse(extractLayer(sourceDocument, 'daniel', new Set(child.gates)));
     const color = childPalette[index % childPalette.length];
     const childGroup = makePlaneGroup(childData.paths, child.id, new Set(), new Set(), {
-      color, name: child.name, scale: familyLayout.childScale, offsetX, offsetY
+      color, name: child.name, scale: familyLayout.childScale
     });
-    childGroup.position.z = 0;
-    familyGroups[child.id] = childGroup;
-    chartRoot.add(childGroup);
+    childGroup.position.set(-halfChild, 0, 0);
+    childPosition.add(childGroup);
+    childPosition.position.z = 0;
+    familyGroups[child.id] = childPosition;
+    chartRoot.add(childPosition);
     if (transitSnapshot) {
       const activations = new Set([...child.gates, ...transitSnapshot.gates]);
       const transitData = loader.parse(extractLayer(sourceDocument, 'daniel', activations));
       const transitGroup = makeTransitGroup(transitData, transitSnapshot, new Set(child.gates), child.id);
       transitGroup.scale.set(familyLayout.childScale, -familyLayout.childScale, familyLayout.childScale);
-      transitGroup.position.set(-194.4 * familyLayout.childScale + offsetX, 194.4 * familyLayout.childScale + offsetY, 0);
-      transitGroup.position.z = 0;
+      transitGroup.position.set(-halfChild, 0, 0);
       transitGroups[child.id] = transitGroup;
-      chartRoot.add(transitGroup);
+      childPosition.add(transitGroup);
       transitGroup.visible = transitToggle.checked;
     }
   });
@@ -996,10 +1001,10 @@ function resize() {
   if (!rect.width || !rect.height) return;
   renderer.setSize(rect.width, rect.height, false);
   const aspect = rect.width / rect.height;
-  const childRows = Math.ceil(familyChildren.length / 2);
-  const childVerticalOffset = childRows > 1 ? Math.ceil((childRows - 1) / 2) * 95 : 0;
-  const halfWidth = Math.max(300 * aspect, familyLayout.childRadius + 194.4 * familyLayout.childScale + 35, 165);
-  const halfHeight = Math.max(familyLayout.parentRadius + 194.4 * familyLayout.parentScale + 35, 194.4 * familyLayout.childScale + childVerticalOffset + 35, halfWidth / aspect);
+  const childrenPerSide = Math.ceil(familyChildren.length / 2);
+  const furthestChild = familyLayout.childRadius + Math.max(0, childrenPerSide - 1) * familyLayout.childSpacing;
+  const halfWidth = Math.max(300 * aspect, furthestChild + 194.4 * familyLayout.childScale + 35, 165);
+  const halfHeight = Math.max(194.4 * familyLayout.parentScale + 35, 194.4 * familyLayout.childScale + 35, halfWidth / aspect);
   camera.left = -halfWidth;
   camera.right = halfWidth;
   camera.top = halfHeight;
@@ -1020,7 +1025,7 @@ function orient(mode) {
   controls.minPolarAngle = 0;
   controls.maxPolarAngle = Math.PI;
   controls.reset();
-  if (mode === 'edge') camera.position.set(800, -20, 0.01);
+  if (mode === 'edge') camera.position.set(800, 0, 0.01);
   else camera.position.set(0, 0, 820);
   controls.target.set(0, 0, 0);
   lockOrbitElevation();
