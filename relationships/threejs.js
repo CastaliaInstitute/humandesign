@@ -4,6 +4,11 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { SVGLoader } from 'three/addons/loaders/SVGLoader.js';
 
 const canvas = document.querySelector('#scene');
+const rotationReadout = document.createElement('output');
+rotationReadout.id = 'rotationReadout';
+rotationReadout.setAttribute('aria-label', 'Current view rotation angle');
+rotationReadout.textContent = 'Rotation 0°';
+document.body.append(rotationReadout);
 const status = document.querySelector('#status');
 const scene = new THREE.Scene();
 scene.background = new THREE.Color('#f8f5ed');
@@ -40,17 +45,25 @@ scene.add(chartRoot);
 // Rotate the whole family layout around its shared center. Keeping the camera
 // fixed preserves the exact-overlap front view as the starting orientation.
 let familyAzimuth = 0;
+let childAlignmentTurn = null;
 function rotateFamily(step) {
+  childAlignmentTurn = null;
   familyAzimuth += step;
   chartRoot.rotation.y = familyAzimuth;
+  refreshFrontFamilyReading();
 }
 const planeGroups = {};
 let relationshipGroup = null;
 const transitGroups = {};
 const familyGroups = {};
 let familyChildren = [];
+let comparisonPair = null;
 let transitSnapshot = null;
 let transitDurationEstimates = [];
+const comparisonBaseSelect = document.querySelector('#compareBase');
+const comparisonOverlaySelect = document.querySelector('#compareOverlay');
+const comparisonControl = comparisonBaseSelect?.closest('.control');
+if (comparisonControl) document.querySelector('#authMenu')?.append(comparisonControl);
 const transitToggle = document.querySelector('#showTransits');
 try {
   transitToggle.checked = localStorage.getItem('castalia-hd-show-transits') !== 'false';
@@ -64,13 +77,33 @@ const channelDescriptions = new Map();
 let rebuildTimer = null;
 let exactFrontAlignment = true;
 let frontPerson = 'daniel';
+let readingFrontPerson = null;
 const flowAnimations = [];
 const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+let autoRotate = !reduceMotion;
+const autoRotateSpeed = 0.035; // radians per second; one slow turn takes about three minutes
 const colors = { daniel: new THREE.Color('#087fa5'), camille: new THREE.Color('#cf4f79') };
 const childPalette = ['#488f73', '#b67a37', '#7864a6', '#518a9d'].map(color => new THREE.Color(color));
 const familyLayout = { parentScale: parentChartScale, childScale: 0.42, parentRadius: 0 };
+const overlapDepthOffset = 0.18;
 function childPlaneRadius() {
   return Number(document.querySelector('#separation').value) / 2;
+}
+function updateComparisonOptions() {
+  if (!comparisonBaseSelect || !comparisonOverlaySelect) return;
+  const people = [
+    { id: 'daniel', name: window.hdChartNames?.daniel || 'Daniel' },
+    { id: 'camille', name: window.hdChartNames?.camille || 'Camille' },
+    ...familyChildren.map((child, index) => ({ id: child.id, name: child.name || `Child ${index + 1}` }))
+  ];
+  if (comparisonPair && comparisonPair.some(id => !people.some(person => person.id === id))) comparisonPair = null;
+  const populate = (select, placeholder, selected) => {
+    select.replaceChildren(new Option(placeholder, ''));
+    people.forEach(person => select.add(new Option(person.name, person.id)));
+    select.value = people.some(person => person.id === selected) ? selected : '';
+  };
+  populate(comparisonBaseSelect, 'Choose first chart…', comparisonPair?.[0]);
+  populate(comparisonOverlaySelect, 'Choose second chart…', comparisonPair?.[1]);
 }
 function chartColor(person) {
   if (colors[person]) return colors[person];
@@ -156,19 +189,49 @@ function transitGateWindow(gate) {
 function transitPlanetNames(gate) {
   return transitSnapshot?.gatePlanets?.[gate]?.join(', ') || 'current transit';
 }
+function personCurrentlyInFront() {
+  chartRoot.updateMatrixWorld(true);
+  const towardViewer = camera.getWorldDirection(new THREE.Vector3()).negate();
+  const target = controls.target;
+  const candidates = [];
+  for (const person of ['daniel', 'camille']) {
+    const group = planeGroups[person];
+    if (!group?.visible) continue;
+    candidates.push({ person, point: group.localToWorld(new THREE.Vector3(194.4, chartViewHeight / 2, 0)) });
+  }
+  for (const child of familyChildren) {
+    const group = familyGroups[child.id];
+    if (!group?.visible) continue;
+    const chart = group.children.find(item => item.name.includes('SVG plane'));
+    if (chart) candidates.push({ person: child.id, point: chart.localToWorld(new THREE.Vector3(194.4, chartViewHeight / 2, 0)) });
+  }
+  if (!candidates.length) return frontPerson;
+  const scores = candidates.map(candidate => ({ ...candidate, depth: candidate.point.sub(target).dot(towardViewer) }));
+  const highest = Math.max(...scores.map(candidate => candidate.depth));
+  // Keep the current reading through near-ties so it does not flicker while
+  // the family turns between two equally distant charts.
+  const current = scores.find(candidate => candidate.person === readingFrontPerson);
+  if (current && current.depth >= highest - 2) return current.person;
+  return scores.find(candidate => candidate.depth === highest)?.person || frontPerson;
+}
+function refreshFrontFamilyReading() {
+  if (personCurrentlyInFront() !== readingFrontPerson) frontFamilyReading();
+}
 function frontFamilyReading() {
   const root = document.querySelector('#familyReadingBody');
   if (!root || !sourceDocument) return;
+  const readingPerson = personCurrentlyInFront();
+  readingFrontPerson = readingPerson;
   root.replaceChildren();
-  const peers = [frontPerson === 'daniel' ? 'camille' : 'daniel', ...familyChildren.map(child => child.id)];
-  const gates = new Map([[frontPerson, gatesFor(frontPerson)]]);
+  const peers = ['daniel', 'camille', ...familyChildren.map(child => child.id)].filter(person => person !== readingPerson);
+  const gates = new Map([[readingPerson, gatesFor(readingPerson)]]);
   for (const peer of peers) gates.set(peer, gatesFor(peer));
   const activations = person => window.hdNatalPlanetaryActivations?.[person] || familyChildren.find(child => child.id === person)?.activations || [];
   const personName = person => window.hdChartNames?.[person] || (person === 'daniel' ? 'Person 1' : person === 'camille' ? 'Person 2' : 'Child');
-  const frontName = personName(frontPerson);
-  const summary = summarizeChart(gates.get(frontPerson), activations(frontPerson));
+  const frontName = personName(readingPerson);
+  const summary = summarizeChart(gates.get(readingPerson), activations(readingPerson));
   const heading = document.querySelector('#familyReadingTitle');
-  if (heading) heading.textContent = 'Family chart descriptions';
+  if (heading) heading.textContent = `Family chart descriptions · ${frontName} in front`;
   if (!summary) return;
 
   const profiles = [
@@ -186,7 +249,7 @@ function frontFamilyReading() {
   intro.textContent = `In front: ${frontName} · ${summary.label}. Human Design strategy: ${summary.strategy}. Defined centers: ${centerNames.join(', ') || 'none'}; defined channels: ${summary.definedChannels.length}.`;
   root.append(intro);
 
-  const natalFrontGates = gates.get(frontPerson);
+  const natalFrontGates = gates.get(readingPerson);
   const transitGates = new Set(transitSnapshot?.gates || []);
   const transitOnlyGates = [...transitGates].filter(gate => !natalFrontGates.has(gate));
   const transitChannels = [];
@@ -197,7 +260,7 @@ function frontFamilyReading() {
   });
   if (transitToggle.checked && transitSnapshot) {
     const combined = new Set([...natalFrontGates, ...transitGates]);
-    const combinedSummary = summarizeChart(combined, activations(frontPerson));
+    const combinedSummary = summarizeChart(combined, activations(readingPerson));
     const temporaryCenters = (combinedSummary?.definedCenters || []).filter(center => !summary.definedCenters.includes(center));
     for (const channel of channels) {
       if (!combined.has(channel.from) || !combined.has(channel.to) || summary.definedChannels.includes(channel.id)) continue;
@@ -223,7 +286,7 @@ function frontFamilyReading() {
   }
 
   for (const peer of peers) {
-    const frontGates = gates.get(frontPerson), peerGates = gates.get(peer);
+    const frontGates = gates.get(readingPerson), peerGates = gates.get(peer);
     const peerSummary = summarizeChart(peerGates, activations(peer));
     const sharedGates = [...frontGates].filter(gate => peerGates.has(gate)).sort((a, b) => a - b);
     const sharedChannels = channels.filter(channel => frontGates.has(channel.from) && frontGates.has(channel.to) && peerGates.has(channel.from) && peerGates.has(channel.to));
@@ -281,6 +344,7 @@ function frontFamilyReading() {
   note.textContent = 'A Human Design parenting lens: use strategy and center contrasts as questions for reflection, not fixed claims about a person. Transit end windows are ephemeris estimates and may change; this is not a compatibility verdict.';
   root.append(note);
 }
+controls.addEventListener('change', refreshFrontFamilyReading);
 const pale = new THREE.Color('#fffcf5');
 const gray = new THREE.Color('#96928a');
 const relationshipChannelReadings = {
@@ -496,23 +560,39 @@ function describePathFeature(node, person, activationsByGate) {
   if (center) {
     const centerId = center.dataset.center || 'body';
     const [label, meaning] = centerDescriptions[centerId] || [centerId.replace(/\b\w/g, letter => letter.toUpperCase()), 'A Human Design energy center.'];
-    const defined = center.dataset.defined === 'true';
     const key = `${person}:center:${label}`;
     const doc = center.ownerDocument || sourceDocument;
-    let summary = '';
-    if (defined && doc) {
-      const activeGates = gatesFor(person);
-      const centerGates = [...doc.querySelectorAll(`.gate[data-center="${centerId}"]`)].map(gate => +gate.dataset.gate).filter(Number.isFinite);
-      const activeCenterGates = centerGates.filter(gate => activeGates.has(gate));
-      const definedChannels = [...doc.querySelectorAll('.channel-group[data-from][data-to]')]
-        .filter(channel => channel.getAttribute('data-defined') === 'true' && (activeCenterGates.includes(+channel.dataset.from) || activeCenterGates.includes(+channel.dataset.to)))
-        .map(channel => `${Math.min(+channel.dataset.from, +channel.dataset.to)}–${Math.max(+channel.dataset.from, +channel.dataset.to)}`);
-      const parts = [];
-      if (activeCenterGates.length) parts.push(`gates ${activeCenterGates.join(', ')}`);
-      if (definedChannels.length) parts.push(`channels ${definedChannels.join(', ')}`);
-      if (parts.length) summary = ` Defined as: ${parts.join(' and ')}.`;
-    }
-    return hoverInfo(key, `${label} center`, `${meaning} ${owner} · ${defined ? 'defined' : 'undefined'}.${summary}`);
+    const activeCenterGates = doc
+      ? [...doc.querySelectorAll(`.gate[data-center="${centerId}"][data-state="closed"]`)]
+        .map(gate => +gate.dataset.gate).filter(Number.isFinite)
+      : [];
+    const gateCenters = new Map(doc
+      ? [...doc.querySelectorAll('.gate[data-gate][data-center]')].map(gate => [+gate.dataset.gate, gate.dataset.center])
+      : []);
+    const definedChannels = doc
+      ? [...doc.querySelectorAll('.channel-group[data-from][data-to]')].filter(channel => {
+        if (channel.dataset.defined !== 'true') return false;
+        return gateCenters.get(+channel.dataset.from) === centerId || gateCenters.get(+channel.dataset.to) === centerId;
+      })
+      : [];
+    const defined = definedChannels.length > 0;
+    const gateThemes = activeCenterGates.map(number => {
+      const gateMeaning = gateDescriptions.get(number);
+      return `Gate ${number}${gateMeaning?.name ? ` · ${gateMeaning.name}` : ''}: ${gateMeaning?.description || 'an activated gate theme in this center'}`;
+    });
+    const channelThemes = definedChannels.map(channel => {
+      const from = +channel.dataset.from, to = +channel.dataset.to;
+      const id = `${Math.min(from, to)}-${Math.max(from, to)}`;
+      const channelMeaning = channelDescriptions.get(id);
+      return `Channel ${id.replace('-', '–')}${channelMeaning?.name ? ` · ${channelMeaning.name}` : ''}${channelMeaning?.description ? `: ${channelMeaning.description}` : ''}`;
+    });
+    const activationText = gateThemes.length
+      ? `Active gate themes: ${gateThemes.join('; ')}.`
+      : 'No natal or transit gates are active in this center.';
+    const definitionText = defined
+      ? `Defined through ${channelThemes.join('; ')}.`
+      : 'Undefined: an activated gate can color this center, but a complete channel is needed to define it.';
+    return hoverInfo(key, `${label} center`, `${meaning} ${owner} · ${defined ? 'defined' : 'undefined'}. ${definitionText} ${activationText}`);
   }
   return null;
 }
@@ -555,7 +635,7 @@ function makePlaneGroup(paths, person, sharedChannels, relationshipChannels, opt
       // In exact front view, separate shared tracks by a few pixels so both
       // contributors remain visibly blue and pink instead of blending purple.
       const opacity = active ? (exactFrontAlignment ? 0.46 : 0.78) : 0.17;
-      const sharedOffset = exactFrontAlignment && active && sharedChannels.has(channelId) ? (person === 'daniel' ? -2.2 : 2.2) : 0;
+      const sharedOffset = !comparisonPair && exactFrontAlignment && active && sharedChannels.has(channelId) ? (person === 'daniel' ? -2.2 : 2.2) : 0;
       // Each SVG rail becomes a two-lane carriageway; the divider and dashed lane marks make the road legible in depth.
       const roadMat = lineMaterial(roadColor, opacity);
       const laneMat = lineMaterial(pale, active ? (exactFrontAlignment ? 0.22 : 0.7) : 0.13);
@@ -595,7 +675,10 @@ function makePlaneGroup(paths, person, sharedChannels, relationshipChannels, opt
         ? '#cf2943'
         : gateActivations.some(item => item.type === 'personality') ? '#24231f' : color;
       const fillColor = isGateMarker ? (gateActive ? gateFillColor : pale) : (centerActive ? color : pale);
-      const fillMat = new THREE.MeshBasicMaterial({ color: fillColor, transparent: true, opacity: isCenterShape ? (centerActive ? (exactFrontAlignment ? 0.3 : 0.42) : 0.48) : (exactFrontAlignment ? 0.64 : 0.94), side: THREE.DoubleSide, depthWrite: false });
+      const fillOpacity = isCenterShape
+        ? (centerActive ? (exactFrontAlignment ? 0.3 : 0.42) : 0.48)
+        : gateActive ? (exactFrontAlignment ? 0.35 : 0.55) : 0;
+      const fillMat = new THREE.MeshBasicMaterial({ color: fillColor, transparent: true, opacity: fillOpacity, side: THREE.DoubleSide, depthWrite: false });
       const outlineActive = isCenterShape ? centerActive : gateActive;
       const outlineMat = lineMaterial(color, exactFrontAlignment ? (outlineActive ? 0.92 : 0.56) : (outlineActive ? 1 : 0.76));
       for (const shape of path.toShapes(true)) addShapeMesh(group, shape, fillMat, isCenterShape ? 1.2 : 3.1, hover);
@@ -676,50 +759,62 @@ function getGatePoints(paths) {
   }
   return result;
 }
-function chartPointInFamily(point, person) {
+function chartPointInFamily(point, person, localDepth = 0) {
   const childIndex = familyChildren.findIndex(child => child.id === person);
   const isChild = childIndex >= 0;
+  if (comparisonPair?.includes(person)) {
+    const chart = isChild
+      ? familyGroups[person]?.children.find(item => item.name.includes('SVG plane'))
+      : planeGroups[person];
+    if (chart) {
+      chartRoot.updateMatrixWorld(true);
+      return chartRoot.worldToLocal(chart.localToWorld(new THREE.Vector3(point.x, point.y, localDepth)));
+    }
+  }
   const scale = isChild ? familyLayout.childScale : familyLayout.parentScale;
-  let centerX = 0, centerY = 0, centerZ = 0, childAngle = 0;
+  let centerX = 0, centerY = 0, centerZ = 0, childRotation = 0;
   if (isChild) {
     const side = childIndex % 2 === 0 ? 1 : -1;
     const childOrdinal = Math.floor(childIndex / 2);
     const sideCount = side > 0 ? Math.ceil(familyChildren.length / 2) : Math.floor(familyChildren.length / 2);
     const offset = sideCount > 1 ? (childOrdinal / (sideCount - 1) - 0.5) * (Math.PI / 3) : 0;
-    childAngle = side > 0 ? offset : Math.PI - offset;
+    const childAngle = side > 0 ? offset : Math.PI - offset;
     centerX = childPlaneRadius() * Math.cos(childAngle);
     centerZ = childPlaneRadius() * Math.sin(childAngle);
+    childRotation = Math.atan2(-centerX, -centerZ);
   } else {
     centerY = person === 'daniel' ? familyLayout.parentRadius : -familyLayout.parentRadius;
   }
   const localX = point.x * scale - 194.4 * scale;
   const localY = -point.y * scale + chartViewHeight * scale + centerY;
+  const localZ = localDepth * scale;
   if (isChild) {
     return new THREE.Vector3(
-      centerX + Math.cos(childAngle) * localX,
+      centerX + Math.cos(childRotation) * localX + Math.sin(childRotation) * localZ,
       localY,
-      centerZ - Math.sin(childAngle) * localX
+      centerZ - Math.sin(childRotation) * localX + Math.cos(childRotation) * localZ
     );
   }
   return new THREE.Vector3(
     localX + centerX,
     localY,
-    0
+    (planeGroups[person]?.position.z || 0) + localZ
   );
 }
-function relationshipLinkSpecs(a, b, danielGates, camilleGates, transitGates) {
-  const danielActive = new Set([...danielGates, ...transitGates]);
-  const camilleActive = new Set([...camilleGates, ...transitGates]);
-  // Natal channels remain represented by each chart. Transits may add a
-  // temporary cross-chart bridge, but a channel supplied only by the shared
-  // transit sky is not a relationship-specific contribution.
-  if ((danielGates.has(a) && danielGates.has(b)) || (camilleGates.has(a) && camilleGates.has(b))) return [];
+function relationshipLinkSpecs(a, b, personA, personB, natalGates, transitGates) {
+  const gatesA = natalGates[personA] || new Set();
+  const gatesB = natalGates[personB] || new Set();
+  const activeA = new Set([...gatesA, ...transitGates]);
+  const activeB = new Set([...gatesB, ...transitGates]);
+  // A bridge represents something completed across these two charts. Skip a
+  // channel either chart already has natally, and do not count sky-only links.
+  if ((gatesA.has(a) && gatesA.has(b)) || (gatesB.has(a) && gatesB.has(b))) return [];
   const links = [];
-  if (danielActive.has(a) && camilleActive.has(b) && (danielGates.has(a) || camilleGates.has(b))) {
-    links.push({ fromPerson: 'daniel', fromGate: a, toPerson: 'camille', toGate: b });
+  if (activeA.has(a) && activeB.has(b) && (gatesA.has(a) || gatesB.has(b))) {
+    links.push({ fromPerson: personA, fromGate: a, toPerson: personB, toGate: b });
   }
-  if (camilleActive.has(a) && danielActive.has(b) && (camilleGates.has(a) || danielGates.has(b))) {
-    links.push({ fromPerson: 'camille', fromGate: a, toPerson: 'daniel', toGate: b });
+  if (activeB.has(a) && activeA.has(b) && (gatesB.has(a) || gatesA.has(b))) {
+    links.push({ fromPerson: personB, fromGate: a, toPerson: personA, toGate: b });
   }
   return links;
 }
@@ -727,112 +822,102 @@ function snapshotPlanetNames(snapshot, gate) {
   const planets = snapshot?.gatePlanets?.[gate] || [];
   return planets.length ? ` (${planets.join(', ')})` : '';
 }
-function makeRelationshipGroup(danielData, camilleData, danielGates, camilleGates, separation, transitSnapshot) {
+function makeRelationshipGroup(chartData, natalGates, transitSnapshot) {
   const group = new THREE.Group();
-  group.name = 'Relationship-completed channels · middle plane';
-  const gatePointsD = getGatePoints(danielData.paths);
-  const gatePointsC = getGatePoints(camilleData.paths);
-  const half = Number(separation) / 2;
-  const danielZ = frontPerson === 'daniel' ? half : -half;
-  const camilleZ = -danielZ;
-  // Gate markers are drawn at local z=3.3 in each plane. Preserve that same
-  // local depth for bridge endpoints on both charts, regardless of which
-  // plane is closer to the camera.
+  group.name = 'Relationship-completed channels · all family charts';
   const gateMarkerZ = 3.3;
   const gold = lineMaterial(new THREE.Color('#eab64b'), 0.98);
-  const blue = lineMaterial(colors.daniel, 0.9);
-  const pink = lineMaterial(colors.camille, 0.9);
+  const personMaterials = new Map();
+  const materialFor = person => {
+    if (!personMaterials.has(person)) personMaterials.set(person, lineMaterial(chartColor(person), 0.9));
+    return personMaterials.get(person);
+  };
   const transitPurple = lineMaterial(new THREE.Color('#7c3aed'), 0.95);
   const transitGates = new Set(transitSnapshot?.gates || []);
-  const natalGates = { daniel: danielGates, camille: camilleGates };
-  const gatePoints = { daniel: gatePointsD, camille: gatePointsC };
-  const planeZ = { daniel: danielZ, camille: camilleZ };
-  const personColors = { daniel: blue, camille: pink };
-  const personNames = {
-    daniel: window.hdChartNames?.daniel || 'Person 1',
-    camille: window.hdChartNames?.camille || 'Person 2'
-  };
-  const gateMarkerMaterial = (person, gate) => natalGates[person].has(gate) ? personColors[person] : transitPurple;
+  const people = comparisonPair || Object.keys(chartData);
+  const gatePoints = Object.fromEntries(people.map(person => [person, getGatePoints(chartData[person].paths)]));
+  const personNames = Object.fromEntries(people.map(person => [person, window.hdChartNames?.[person] || (person === 'daniel' ? 'Person 1' : person === 'camille' ? 'Person 2' : 'Child')]));
+  const gateMarkerMaterial = (person, gate) => natalGates[person]?.has(gate) ? materialFor(person) : transitPurple;
   const gateSourceDescription = (person, gate) => {
     const sources = [];
-    if (natalGates[person].has(gate)) sources.push('natal');
+    if (natalGates[person]?.has(gate)) sources.push('natal');
     if (transitGates.has(gate)) sources.push(`transit${snapshotPlanetNames(transitSnapshot, gate)}`);
     return `Gate ${gate}: ${personNames[person]} (${sources.join(' + ')})`;
   };
   let bridgeCount = 0;
-  for (const path of danielData.paths) {
-    const node = path.userData.node;
-    const cls = node?.getAttribute('class') || '';
-    if (!cls.split(/\s+/).includes('channel')) continue;
-    const channel = channelGroup(node);
-    if (!channel || !path.subPaths?.length) continue;
-    const a = +channel.dataset.from, b = +channel.dataset.to;
-    const specs = relationshipLinkSpecs(a, b, danielGates, camilleGates, transitGates);
-    if (!specs.length) continue;
-    bridgeCount++;
-    const channelId = `${Math.min(a, b)}-${Math.max(a, b)}`;
-    const reading = relationshipChannelReadings[channelId] || channelDescriptions.get(channelId);
-    const title = `Relationship channel ${a}–${b}${reading?.name ? ` · ${reading.name}` : ''}`;
-    const links = [];
-    for (const spec of specs) {
-      const from = gatePoints[spec.fromPerson].get(spec.fromGate);
-      const to = gatePoints[spec.toPerson].get(spec.toGate);
-      links.push({
-        ...spec,
-        from: from && chartPointInFamily(from, spec.fromPerson),
-        to: to && chartPointInFamily(to, spec.toPerson),
-        fromZ: planeZ[spec.fromPerson] + gateMarkerZ,
-        toZ: planeZ[spec.toPerson] + gateMarkerZ,
-        fromMaterial: gateMarkerMaterial(spec.fromPerson, spec.fromGate),
-        toMaterial: gateMarkerMaterial(spec.toPerson, spec.toGate)
-      });
-    }
-    const contributors = links.map(link => `${gateSourceDescription(link.fromPerson, link.fromGate)} ↔ ${gateSourceDescription(link.toPerson, link.toGate)}`);
-    const detail = [
-      reading?.description || 'These two gates join the connected centers in the Human Design BodyGraph.',
-      `Cross-chart bridge · ${contributors.join(' · ')}. Natal and current transit activations are shown separately; a channel completed only by the shared transit sky is not counted as a relationship bridge.`
-    ].join(' ');
-    const tip = hoverInfo(`relationship:channel:${channelId}`, title, detail);
-    const sourceStart = gatePointsD.get(a);
-    const sourceEnd = gatePointsD.get(b);
-    for (const link of links) {
-      if (!link.from || !link.to || !sourceStart || !sourceEnd) continue;
-      // Reuse the SVG channel spline itself. Endpoint offsets map its ends to
-      // each person's open gate while preserving the exact front-view curve.
-      let route = path.subPaths[0].getPoints(64);
-      const distance = (p, q) => Math.hypot(p.x - q.x, p.y - q.y);
-      const startsAtA = distance(route[0], sourceStart) <= distance(route[route.length - 1], sourceStart);
-      const shouldReverse = link.fromGate === a ? !startsAtA : startsAtA;
-      if (shouldReverse) route = route.reverse();
-      const first = chartPointInFamily(route[0], 'daniel');
-      const last = chartPointInFamily(route[route.length - 1], 'daniel');
-      const startDx = link.from.x - first.x, startDy = link.from.y - first.y;
-      const endDx = link.to.x - last.x, endDy = link.to.y - last.y;
-      const points = route.map((point, index) => {
-        const t = index / (route.length - 1);
-        const familyPoint = chartPointInFamily(point, 'daniel');
-        return new THREE.Vector3(
-          familyPoint.x + startDx * (1 - t) + endDx * t,
-          familyPoint.y + startDy * (1 - t) + endDy * t,
-          link.fromZ + (link.toZ - link.fromZ) * t
-        );
-      });
-      const spline = new THREE.CatmullRomCurve3(points, false, 'centripetal');
-      const transitContributed = !natalGates[link.fromPerson].has(link.fromGate) || !natalGates[link.toPerson].has(link.toGate);
-      const bridges = transitContributed
-        ? dashedTubesFromCurve(spline, 1.25, gold)
-        : [new THREE.Mesh(new THREE.TubeGeometry(spline, 96, 1.25, 6, false), gold)];
-      for (const bridge of bridges) {
-        Object.assign(bridge.userData, tip);
-        group.add(bridge);
-      }
-      addFlowMotion(group, spline, '#fff0b0', tip);
-      addFlowMotion(group, spline, '#39aabd', tip, true);
-      for (const [point, z, material] of [[link.from, link.fromZ, link.fromMaterial], [link.to, link.toZ, link.toMaterial]]) {
-        const bead = new THREE.Mesh(new THREE.SphereGeometry(2.3, 10, 8), material);
-        bead.position.set(point.x, point.y, z);
-        Object.assign(bead.userData, tip);
-        group.add(bead);
+  chartRoot.updateMatrixWorld(true);
+  const templatePaths = chartData.daniel?.paths || chartData[people[0]]?.paths || [];
+  for (let firstIndex = 0; firstIndex < people.length; firstIndex++) {
+    for (let secondIndex = firstIndex + 1; secondIndex < people.length; secondIndex++) {
+      const personA = people[firstIndex], personB = people[secondIndex];
+      for (const path of templatePaths) {
+        const node = path.userData.node;
+        const cls = node?.getAttribute('class') || '';
+        if (!cls.split(/\s+/).includes('channel')) continue;
+        const channel = channelGroup(node);
+        if (!channel || !path.subPaths?.length) continue;
+        const a = +channel.dataset.from, b = +channel.dataset.to;
+        const specs = relationshipLinkSpecs(a, b, personA, personB, natalGates, transitGates);
+        if (!specs.length) continue;
+        bridgeCount++;
+        const channelId = `${Math.min(a, b)}-${Math.max(a, b)}`;
+        const reading = relationshipChannelReadings[channelId] || channelDescriptions.get(channelId);
+        const title = `${personNames[personA]} ↔ ${personNames[personB]} · channel ${a}–${b}${reading?.name ? ` · ${reading.name}` : ''}`;
+        const links = specs.map(spec => {
+          const from = gatePoints[spec.fromPerson]?.get(spec.fromGate);
+          const to = gatePoints[spec.toPerson]?.get(spec.toGate);
+          return {
+            ...spec,
+            from: from && chartPointInFamily(from, spec.fromPerson, gateMarkerZ),
+            to: to && chartPointInFamily(to, spec.toPerson, gateMarkerZ),
+            fromMaterial: gateMarkerMaterial(spec.fromPerson, spec.fromGate),
+            toMaterial: gateMarkerMaterial(spec.toPerson, spec.toGate)
+          };
+        });
+        const contributors = links.map(link => `${gateSourceDescription(link.fromPerson, link.fromGate)} ↔ ${gateSourceDescription(link.toPerson, link.toGate)}`);
+        const detail = [
+          reading?.description || 'These two gates join the connected centers in the Human Design BodyGraph.',
+          `Family bridge between ${personNames[personA]} and ${personNames[personB]} · ${contributors.join(' · ')}. Dashed bridges include at least one transit gate; a channel completed only by the shared transit sky is not counted.`
+        ].join(' ');
+        const tip = hoverInfo(`relationship:channel:${channelId}`, title, detail);
+        const sourceStart = gatePoints[personA]?.get(a);
+        const sourceEnd = gatePoints[personA]?.get(b);
+        for (const link of links) {
+          if (!link.from || !link.to || !sourceStart || !sourceEnd) continue;
+          // Keep the original SVG channel spline and ease its endpoints onto
+          // the actual gates in each participant's plane.
+          let route = path.subPaths[0].getPoints(64);
+          const distance = (p, q) => Math.hypot(p.x - q.x, p.y - q.y);
+          const startsAtA = distance(route[0], sourceStart) <= distance(route[route.length - 1], sourceStart);
+          const shouldReverse = link.fromGate === a ? !startsAtA : startsAtA;
+          if (shouldReverse) route = route.reverse();
+          const first = chartPointInFamily(route[0], personA);
+          const last = chartPointInFamily(route[route.length - 1], personA);
+          const startDelta = link.from.clone().sub(first);
+          const endDelta = link.to.clone().sub(last);
+          const points = route.map((point, index) => {
+            const t = index / (route.length - 1);
+            const familyPoint = chartPointInFamily(point, personA);
+            return familyPoint.addScaledVector(startDelta, 1 - t).addScaledVector(endDelta, t);
+          });
+          const spline = new THREE.CatmullRomCurve3(points, false, 'centripetal');
+          const transitContributed = !natalGates[link.fromPerson].has(link.fromGate) || !natalGates[link.toPerson].has(link.toGate);
+          const bridges = transitContributed
+            ? dashedTubesFromCurve(spline, 1.25, gold)
+            : [new THREE.Mesh(new THREE.TubeGeometry(spline, 96, 1.25, 6, false), gold)];
+          for (const bridge of bridges) {
+            Object.assign(bridge.userData, tip);
+            group.add(bridge);
+          }
+          addFlowMotion(group, spline, '#fff0b0', tip);
+          addFlowMotion(group, spline, '#39aabd', tip, true);
+          for (const [point, material] of [[link.from, link.fromMaterial], [link.to, link.toMaterial]]) {
+            const bead = new THREE.Mesh(new THREE.SphereGeometry(2.3, 10, 8), material);
+            bead.position.copy(point);
+            Object.assign(bead.userData, tip);
+            group.add(bead);
+          }
+        }
       }
     }
   }
@@ -910,19 +995,32 @@ function rebuildRelationship() {
   flowAnimations.length = 0;
   const danielGates = parseGateList('#danielGates');
   const camilleGates = parseGateList('#camilleGates');
+  const natalGates = { daniel: danielGates, camille: camilleGates };
+  familyChildren.forEach(child => { natalGates[child.id] = new Set(child.gates || []); });
+  const people = Object.keys(natalGates);
+  const activeTransitSnapshot = transitToggle.checked ? transitSnapshot : null;
   const sharedChannels = new Set([...sourceDocument.querySelectorAll('.channel-group[data-from][data-to]')]
     .filter(channel => danielGates.has(+channel.dataset.from) && danielGates.has(+channel.dataset.to) && camilleGates.has(+channel.dataset.from) && camilleGates.has(+channel.dataset.to))
     .map(channel => `${Math.min(+channel.dataset.from, +channel.dataset.to)}-${Math.max(+channel.dataset.from, +channel.dataset.to)}`));
-  const transitGates = new Set(transitSnapshot?.gates || []);
-  const relationshipChannels = new Set([...sourceDocument.querySelectorAll('.person--daniel .channel-group[data-from][data-to]')]
-    .filter(channel => relationshipLinkSpecs(+channel.dataset.from, +channel.dataset.to, danielGates, camilleGates, transitGates).length > 0)
-    .map(channel => `${Math.min(+channel.dataset.from, +channel.dataset.to)}-${Math.max(+channel.dataset.from, +channel.dataset.to)}`));
-  const layers = {};
+  const transitGates = new Set(activeTransitSnapshot?.gates || []);
+  const relationshipChannels = new Set();
+  const channelElements = [...sourceDocument.querySelectorAll('.person--daniel .channel-group[data-from][data-to]')];
+  for (let i = 0; i < people.length; i++) {
+    for (let j = i + 1; j < people.length; j++) {
+      for (const channel of channelElements) {
+        const a = +channel.dataset.from, b = +channel.dataset.to;
+        if (relationshipLinkSpecs(a, b, people[i], people[j], natalGates, transitGates).length) {
+          relationshipChannels.add(`${Math.min(a, b)}-${Math.max(a, b)}`);
+        }
+      }
+    }
+  }
+  const chartData = {};
   for (const person of ['daniel', 'camille']) {
-    const data = loader.parse(extractLayer(sourceDocument, person, person === 'daniel' ? danielGates : camilleGates));
-    layers[person] = data;
+    const data = loader.parse(extractLayer(sourceDocument, person, natalGates[person]));
+    chartData[person] = data;
     releaseGroup(planeGroups[person]);
-    const centerY = person === 'daniel' ? familyLayout.parentRadius : -familyLayout.parentRadius;
+    const centerY = comparisonPair ? 0 : person === 'daniel' ? familyLayout.parentRadius : -familyLayout.parentRadius;
     const group = makePlaneGroup(data.paths, person, sharedChannels, relationshipChannels, {
       scale: familyLayout.parentScale, offsetY: centerY
     });
@@ -935,30 +1033,31 @@ function rebuildRelationship() {
   }
   const separation = Number(document.querySelector('#separation').value);
   const half = separation / 2;
-  planeGroups.daniel.position.z = frontPerson === 'daniel' ? half : -half;
-  planeGroups.camille.position.z = -planeGroups.daniel.position.z;
+  if (comparisonPair) {
+    planeGroups.daniel.position.z = comparisonPair[0] === 'daniel' ? 0 : comparisonPair[1] === 'daniel' ? overlapDepthOffset : 0;
+    planeGroups.camille.position.z = comparisonPair[0] === 'camille' ? 0 : comparisonPair[1] === 'camille' ? overlapDepthOffset : 0;
+  } else {
+    planeGroups.daniel.position.z = frontPerson === 'daniel' ? half : -half;
+    planeGroups.camille.position.z = -planeGroups.daniel.position.z;
+  }
   document.querySelector('#separationValue').value = String(separation);
-  releaseGroup(relationshipGroup);
-  relationshipGroup = makeRelationshipGroup(layers.daniel, layers.camille, danielGates, camilleGates, separation, transitSnapshot);
-  chartRoot.add(relationshipGroup);
-  relationshipGroup.visible = document.querySelector('#showBridges').checked;
   for (const [person, group] of Object.entries(transitGroups)) {
     releaseGroup(group);
     delete transitGroups[person];
   }
-  if (transitSnapshot) {
+  if (activeTransitSnapshot) {
     for (const person of ['daniel', 'camille']) {
       const natalGates = parseGateList(person === 'daniel' ? '#danielGates' : '#camilleGates');
-      const activations = new Set([...natalGates, ...transitSnapshot.gates]);
+      const activations = new Set([...natalGates, ...activeTransitSnapshot.gates]);
       const transitData = loader.parse(extractLayer(sourceDocument, person, activations));
-      const group = makeTransitGroup(transitData, transitSnapshot, natalGates, person);
-      const centerY = person === 'daniel' ? familyLayout.parentRadius : -familyLayout.parentRadius;
+      const group = makeTransitGroup(transitData, activeTransitSnapshot, natalGates, person);
+      const centerY = comparisonPair ? 0 : person === 'daniel' ? familyLayout.parentRadius : -familyLayout.parentRadius;
       group.scale.set(familyLayout.parentScale, -familyLayout.parentScale, familyLayout.parentScale);
       group.position.set(-194.4 * familyLayout.parentScale, chartViewHeight * familyLayout.parentScale + centerY, 0);
       group.position.z = planeGroups[person].position.z;
       transitGroups[person] = group;
       chartRoot.add(group);
-      group.visible = transitToggle.checked;
+      group.visible = transitToggle.checked && (!comparisonPair || comparisonPair.includes(person));
     }
   }
   familyChildren.forEach((child, index) => {
@@ -972,37 +1071,55 @@ function rebuildRelationship() {
     const offsetZ = Math.sin(angle) * distance;
     const offsetY = 0;
     const childPosition = new THREE.Group();
-    childPosition.position.set(offsetX, offsetY, offsetZ);
-    childPosition.rotation.y = Math.atan2(-offsetX, -offsetZ);
-    const childData = loader.parse(extractLayer(sourceDocument, 'daniel', new Set(child.gates)));
+    const inComparison = comparisonPair?.includes(child.id) || false;
+    const childScale = inComparison ? familyLayout.parentScale : familyLayout.childScale;
+    const comparisonDepth = comparisonPair?.[0] === child.id ? 0 : overlapDepthOffset;
+    childPosition.position.set(
+      inComparison ? 0 : offsetX,
+      offsetY,
+      inComparison ? comparisonDepth : offsetZ
+    );
+    childPosition.rotation.y = inComparison ? 0 : Math.atan2(-offsetX, -offsetZ);
+    const childGates = natalGates[child.id];
+    const childData = loader.parse(extractLayer(sourceDocument, 'daniel', childGates));
+    chartData[child.id] = childData;
     const color = childPalette[index % childPalette.length];
-    const childGroup = makePlaneGroup(childData.paths, child.id, new Set(), new Set(), {
-      color, name: child.name, scale: familyLayout.childScale
+    const childGroup = makePlaneGroup(childData.paths, child.id, new Set(), relationshipChannels, {
+      color, name: child.name, scale: childScale
     });
-    childGroup.position.set(-194.4 * familyLayout.childScale, chartViewHeight * familyLayout.childScale, 0);
+    childGroup.position.set(-194.4 * childScale, chartViewHeight * childScale, 0);
+    childPosition.visible = !comparisonPair || inComparison;
     childPosition.add(childGroup);
     familyGroups[child.id] = childPosition;
     chartRoot.add(childPosition);
-    if (transitSnapshot) {
-      const activations = new Set([...child.gates, ...transitSnapshot.gates]);
+    if (activeTransitSnapshot) {
+      const activations = new Set([...childGates, ...activeTransitSnapshot.gates]);
       const transitData = loader.parse(extractLayer(sourceDocument, 'daniel', activations));
-      const transitGroup = makeTransitGroup(transitData, transitSnapshot, new Set(child.gates), child.id);
-      transitGroup.scale.set(familyLayout.childScale, -familyLayout.childScale, familyLayout.childScale);
-      transitGroup.position.set(-194.4 * familyLayout.childScale, chartViewHeight * familyLayout.childScale, 0);
+      const transitGroup = makeTransitGroup(transitData, activeTransitSnapshot, childGates, child.id);
+      transitGroup.scale.set(childScale, -childScale, childScale);
+      transitGroup.position.set(-194.4 * childScale, chartViewHeight * childScale, 0);
       transitGroups[child.id] = transitGroup;
       childPosition.add(transitGroup);
       transitGroup.visible = transitToggle.checked;
     }
   });
-  planeGroups.daniel.visible = document.querySelector('#showDaniel').checked;
-  planeGroups.camille.visible = document.querySelector('#showCamille').checked;
+  releaseGroup(relationshipGroup);
+  relationshipGroup = makeRelationshipGroup(chartData, natalGates, activeTransitSnapshot);
+  chartRoot.add(relationshipGroup);
+  relationshipGroup.visible = document.querySelector('#showBridges').checked;
+  planeGroups.daniel.visible = comparisonPair ? comparisonPair.includes('daniel') : document.querySelector('#showDaniel').checked;
+  planeGroups.camille.visible = comparisonPair ? comparisonPair.includes('camille') : document.querySelector('#showCamille').checked;
   frontFamilyReading();
-  setStatus(`${relationshipGroup.userData.bridgeCount} relationship channel${relationshipGroup.userData.bridgeCount === 1 ? '' : 's'} shown.`);
+  const comparisonNote = comparisonPair
+    ? ` ${window.hdChartNames?.[comparisonPair[0]] || comparisonPair[0]} is overlapped with ${window.hdChartNames?.[comparisonPair[1]] || comparisonPair[1]}.`
+    : '';
+  setStatus(`${relationshipGroup.userData.bridgeCount} relationship channel bridge${relationshipGroup.userData.bridgeCount === 1 ? '' : 's'} shown across the family.${comparisonNote}`);
 }
 
 window.addEventListener('castalia-family-children-updated', event => {
   familyChildren = Array.isArray(event.detail) ? event.detail : [];
   familyChildren.forEach((child, index) => { window.hdChartNames[child.id] = child.name || `Child ${index + 1}`; });
+    updateComparisonOptions();
   if (sourceDocument && loader) { rebuildRelationship(); resize(); }
 });
 
@@ -1017,7 +1134,7 @@ async function refreshTransits() {
       console.warn('Transit duration estimates are unavailable:', error);
     }
     const time = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(transitSnapshot.epoch * 1000));
-    status.textContent = `As of ${time} · ${transitSnapshot.source}; Sun through Saturn + Earth. Applied to both charts; channel overlays combine natal and transit gates.`;
+    status.textContent = `As of ${time} · ${transitSnapshot.source}; Sun through Saturn + Earth. Applied per bodygraph; dashed family bridges include transit contributions.`;
     if (sourceDocument && loader) rebuildRelationship();
   } catch (error) {
     status.textContent = `Current transits unavailable: ${error.message}`;
@@ -1048,6 +1165,29 @@ function setSeparation(value) {
     resize();
   }
 }
+document.querySelector('#overlapChildButton').addEventListener('click', () => {
+  const first = comparisonBaseSelect.value;
+  const second = comparisonOverlaySelect.value;
+  if (!first || !second || first === second) {
+    setStatus('Choose two different charts to compare.');
+    return;
+  }
+  comparisonPair = [first, second];
+  updateComparisonOptions();
+  pauseAutoRotate();
+  childAlignmentTurn = Math.abs(familyAzimuth) > 0.001
+    ? { from: familyAzimuth, started: performance.now(), duration: 900 }
+    : null;
+  orient('front');
+});
+document.querySelector('#familyLayoutButton').addEventListener('click', () => {
+  childAlignmentTurn = null;
+  comparisonPair = null;
+  updateComparisonOptions();
+  familyAzimuth = 0;
+  chartRoot.rotation.y = 0;
+  orient('front');
+});
 function orient(mode) {
   exactFrontAlignment = mode !== 'edge';
   if (sourceDocument) rebuildRelationship();
@@ -1065,6 +1205,9 @@ function orient(mode) {
 const raycaster = new THREE.Raycaster();
 const pointer = new THREE.Vector2();
 const tip = document.querySelector('#sceneTip');
+function pauseAutoRotate() {
+  autoRotate = false;
+}
 let hoveredKey = null;
 let selectedKey = null;
 let highlightedKey = null;
@@ -1149,8 +1292,10 @@ canvas.addEventListener('pointermove', event => {
 });
 canvas.addEventListener('pointerleave', event => { if (event.pointerType !== 'touch') clearHover(); });
 canvas.addEventListener('pointerdown', event => {
+  pauseAutoRotate();
   if (event.pointerType === 'touch') touchStart = { x: event.clientX, y: event.clientY };
 });
+canvas.addEventListener('wheel', pauseAutoRotate, { passive: true });
 canvas.addEventListener('pointerup', event => {
   if (event.pointerType !== 'touch' || !touchStart) return;
   const moved = Math.hypot(event.clientX - touchStart.x, event.clientY - touchStart.y);
@@ -1205,6 +1350,7 @@ async function init() {
     loader = new SVGLoader();
     if (Array.isArray(window.hdRelationshipChildren)) familyChildren = window.hdRelationshipChildren;
     familyChildren.forEach((child, index) => { window.hdChartNames[child.id] = child.name || `Child ${index + 1}`; });
+    updateComparisonOptions();
     for (const [person, selector] of [['daniel', '.person--daniel'], ['camille', '.person--camille']]) {
       const active = [...sourceDocument.querySelectorAll(`${selector} .gate[data-state="closed"]`)].map(g => +g.dataset.gate);
       document.querySelector(person === 'daniel' ? '#danielGates' : '#camilleGates').value = active.join(', ');
@@ -1225,14 +1371,19 @@ document.querySelector('#separation').addEventListener('input', e => setSeparati
 for (const selector of ['#danielGates', '#camilleGates']) document.querySelector(selector).addEventListener('input', () => { clearTimeout(rebuildTimer); rebuildTimer = setTimeout(rebuildRelationship, 220); });
 document.querySelector('#showBridges').addEventListener('change', e => { if (relationshipGroup) relationshipGroup.visible = e.target.checked; });
 document.querySelector('#showDaniel').addEventListener('change', e => {
-  if (planeGroups.daniel) planeGroups.daniel.visible = e.target.checked;
+  if (planeGroups.daniel) planeGroups.daniel.visible = comparisonPair ? comparisonPair.includes('daniel') : e.target.checked;
+  refreshFrontFamilyReading();
 });
 document.querySelector('#showCamille').addEventListener('change', e => {
-  if (planeGroups.camille) planeGroups.camille.visible = e.target.checked;
+  if (planeGroups.camille) planeGroups.camille.visible = comparisonPair ? comparisonPair.includes('camille') : e.target.checked;
+  refreshFrontFamilyReading();
 });
 transitToggle.addEventListener('change', e => {
-  for (const group of Object.values(transitGroups)) group.visible = e.target.checked;
-  frontFamilyReading();
+  if (sourceDocument && loader) rebuildRelationship();
+  else {
+    for (const group of Object.values(transitGroups)) group.visible = e.target.checked;
+    frontFamilyReading();
+  }
   try { localStorage.setItem('castalia-hd-show-transits', String(e.target.checked)); }
   catch (error) { console.warn('Could not save transit visibility:', error); }
 });
@@ -1242,20 +1393,43 @@ document.querySelector('#reset').addEventListener('click', () => orient('reset')
 window.addEventListener('keydown', event => {
   if (event.target instanceof HTMLElement && event.target.matches('input, textarea, button, select')) return;
   if (event.key === '1' || event.code === 'Numpad1' || event.key === '2' || event.code === 'Numpad2') {
+    pauseAutoRotate();
     frontPerson = event.key === '1' || event.code === 'Numpad1' ? 'daniel' : 'camille';
     rebuildRelationship();
     event.preventDefault();
     return;
   }
   if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+  pauseAutoRotate();
   event.preventDefault();
   const step = (event.shiftKey ? 0.28 : 0.1) * (event.key === 'ArrowLeft' ? 1 : -1);
   rotateFamily(step);
 });
 window.addEventListener('resize', resize);
+let previousFrameTime = performance.now();
 function animate() {
+  const now = performance.now();
+  const delta = Math.min((now - previousFrameTime) / 1000, 0.05);
+  previousFrameTime = now;
+  if (autoRotate) {
+    familyAzimuth += autoRotateSpeed * delta;
+    chartRoot.rotation.y = familyAzimuth;
+    refreshFrontFamilyReading();
+  }
+  if (childAlignmentTurn) {
+    const progress = THREE.MathUtils.clamp((now - childAlignmentTurn.started) / childAlignmentTurn.duration, 0, 1);
+    const eased = progress * progress * (3 - 2 * progress);
+    familyAzimuth = childAlignmentTurn.from * (1 - eased);
+    chartRoot.rotation.y = familyAzimuth;
+    refreshFrontFamilyReading();
+    if (progress === 1) childAlignmentTurn = null;
+  }
   controls.update();
-  const elapsed = performance.now() / 1000;
+  const cameraOffset = camera.position.clone().sub(controls.target);
+  const cameraAzimuth = Math.atan2(cameraOffset.x, cameraOffset.z);
+  const angle = THREE.MathUtils.euclideanModulo(familyAzimuth - cameraAzimuth + Math.PI, Math.PI * 2) - Math.PI;
+  rotationReadout.textContent = `Rotation ${Math.round(THREE.MathUtils.radToDeg(angle))}°`;
+  const elapsed = now / 1000;
   for (const flow of flowAnimations) {
     const progress = (elapsed / flow.duration + flow.phase) % 1;
     flow.bead.position.copy(flow.curve.getPointAt(flow.reverse ? 1 - progress : progress));
