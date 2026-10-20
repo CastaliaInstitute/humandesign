@@ -13,6 +13,16 @@ const menuToggle = document.querySelector('#menuToggle');
 const authMenu = document.querySelector('#authMenu');
 const names = { daniel: 'Person 1', camille: 'Person 2' };
 window.hdChartNames = names;
+let handedOffProviderToken = null;
+function readCastaliaSessionFragment() {
+  const params = new URLSearchParams(location.hash.slice(1));
+  const raw = params.get('castalia_session');
+  if (!raw) return null;
+  history.replaceState(null, '', `${location.pathname}${location.search}`);
+  try { return JSON.parse(raw); }
+  catch (error) { console.warn('Could not read Castalia session handoff:', error); return null; }
+}
+const castaliaSessionHandoff = readCastaliaSessionFragment();
 function status(message) { statusNode.textContent = message; }
 function b64ToUtf8(value) {
   const bytes = Uint8Array.from(atob(value.replace(/\s/g, '')), c => c.charCodeAt(0));
@@ -251,10 +261,19 @@ if (config.supabaseUrl && config.supabaseAnonKey) {
   supabase = createClient(config.supabaseUrl, config.supabaseAnonKey, { auth: { flowType: 'pkce', persistSession: true, autoRefreshToken: true } });
   loginButton.addEventListener('click', async () => {
     status('Opening Castalia sign-in…');
-    const { error } = await supabase.auth.signInWithOAuth({ provider: 'github', options: { redirectTo: location.origin + location.pathname, scopes: 'read:user user:email' } });
-    if (error) status(error.message);
+    const signInUrl = new URL('/auth/signin/', 'https://castalia.institute');
+    signInUrl.searchParams.set('provider', 'github');
+    signInUrl.searchParams.set('scopes', 'read:user user:email');
+    signInUrl.searchParams.set('redirect', '/auth/relay/?app=humandesign');
+    const popup = window.open(signInUrl.toString(), 'castalia-signin', 'popup,width=520,height=720');
+    if (!popup) location.assign(signInUrl.toString());
   });
   logoutButton.addEventListener('click', async () => { await supabase.auth.signOut(); location.reload(); });
+  window.addEventListener('message', event => {
+    if (event.origin !== 'https://castalia.institute' || event.data?.type !== 'castalia-auth-handoff') return;
+    void acceptCastaliaHandoff(event.data);
+  });
+  if (castaliaSessionHandoff?.type === 'castalia-auth-handoff') void acceptCastaliaHandoff(castaliaSessionHandoff);
   supabase.auth.onAuthStateChange((_event, session) => { void handleSession(session); });
   supabase.auth.getSession().then(({ data }) => handleSession(data.session));
 } else { loginButton.disabled = true; status('Showing Daniel and Camille as example charts. Castalia sign-in is not configured yet.'); }
@@ -275,18 +294,41 @@ if (menuToggle && authMenu) {
   });
 }
 document.querySelector('#applyBirthDetails').addEventListener('click', () => { void applyProfiles(); });
-async function handleSession(session) {
+async function acceptCastaliaHandoff(handoff) {
+  if (!supabase || !handoff?.access_token || !handoff?.refresh_token) {
+    status('Castalia returned an incomplete sign-in session. Please try signing in again.');
+    return;
+  }
+  handedOffProviderToken = handoff.provider_token || null;
+  const { data, error } = await supabase.auth.setSession({
+    access_token: handoff.access_token,
+    refresh_token: handoff.refresh_token
+  });
+  if (error) {
+    handedOffProviderToken = null;
+    status(`Could not complete Castalia sign-in: ${error.message}`);
+    return;
+  }
+  await handleSession(data.session, handedOffProviderToken);
+}
+async function handleSession(session, providerToken = null) {
   if (!session?.user || !supabase) return;
-  const login = session.user.user_metadata?.user_name || session.user.user_metadata?.preferred_username || session.user.user_metadata?.login;
+  const githubToken = providerToken || handedOffProviderToken || session.provider_token;
+  let login = session.user.user_metadata?.user_name || session.user.user_metadata?.preferred_username || session.user.user_metadata?.login;
+  if (!login && githubToken) {
+    try { login = (await githubJson('https://api.github.com/user', githubToken)).login; }
+    catch (error) { console.warn('Could not resolve GitHub username:', error.message); }
+  }
   if (!login) { status('Castalia sign-in succeeded, but GitHub did not provide a username.'); return; }
   if (loadedUser === session.user.id) return;
   loadedUser = session.user.id; loginButton.hidden = true; logoutButton.hidden = false;
   status(`Signed in as ${login}; finding your family natal data…`);
   try {
-    const family = await loadFamilyDocument(login, session.provider_token);
+    const family = await loadFamilyDocument(login, githubToken);
     const profiles = profilesFrom(family);
     if (!profiles.length) throw new Error('The GitHub family profile has no complete natal records.');
     installProfileOptions(profiles, login);
     document.querySelector('#profilePicker').hidden = false;
   } catch (error) { loadedUser = null; status(error.message); }
+  finally { handedOffProviderToken = null; }
 }
