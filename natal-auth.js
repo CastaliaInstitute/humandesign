@@ -158,7 +158,12 @@ async function activeChart(profile) {
   return { gates, activations };
 }
 async function publishChildren(profiles) {
-  const children = await Promise.all((profiles || []).filter(profile => profile.familyRole === 'child').map(async (profile, index) => {
+  const childProfiles = (profiles || [])
+    .map((profile, originalIndex) => ({ profile, originalIndex }))
+    .filter(({ profile }) => profile.familyRole === 'child')
+    // Newer birth dates are younger, so left-to-right layout follows increasing age.
+    .sort((a, b) => String(b.profile.birth_date || '').localeCompare(String(a.profile.birth_date || '')) || a.originalIndex - b.originalIndex);
+  const children = await Promise.all(childProfiles.map(async ({ profile }, index) => {
     try {
       return { id: `child-${index + 1}`, name: profile.name || `Child ${index + 1}`, ...await activeChart(profile) };
     } catch (error) {

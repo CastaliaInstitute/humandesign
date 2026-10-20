@@ -832,9 +832,7 @@ function rebuildRelationship() {
     }
   }
   familyChildren.forEach((child, index) => {
-    const side = index % 2 === 0 ? -1 : 1;
-    const column = Math.floor(index / 2);
-    const offsetX = side * (102 + column * 66);
+    const offsetX = 102 + index * 66;
     const childData = loader.parse(extractLayer(sourceDocument, 'daniel', new Set(child.gates)));
     const color = childPalette[index % childPalette.length];
     const childGroup = makePlaneGroup(childData.paths, child.id, new Set(), new Set(), {
@@ -885,7 +883,7 @@ function resize() {
   if (!rect.width || !rect.height) return;
   renderer.setSize(rect.width, rect.height, false);
   const aspect = rect.width / rect.height;
-  const outerChildOffset = 102 + Math.floor(Math.max(0, familyChildren.length - 1) / 2) * 66;
+  const outerChildOffset = 102 + Math.max(0, familyChildren.length - 1) * 66;
   const halfWidth = Math.max(300 * aspect, outerChildOffset + 55, 165);
   const halfHeight = Math.max(300, halfWidth / aspect);
   camera.left = -halfWidth;
