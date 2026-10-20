@@ -7,10 +7,13 @@ const canvas = document.querySelector('#scene');
 const status = document.querySelector('#status');
 const scene = new THREE.Scene();
 scene.background = new THREE.Color('#f8f5ed');
+const chartViewHeight = 360;
+const parentChartScale = 0.62;
 // Orthographic projection keeps parallel chart planes the same apparent size,
 // which is essential for a mathematically exact front overlap.
 const camera = new THREE.OrthographicCamera(-300, 300, 300, -300, 1, 3000);
-camera.position.set(0, 0, 820);
+const familyViewCenterY = chartViewHeight * parentChartScale / 2;
+camera.position.set(0, familyViewCenterY, 820);
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
 renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -18,7 +21,7 @@ const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
 controls.dampingFactor = 0.035;
 controls.rotateSpeed = 0.65;
-controls.target.set(0, 0, 0);
+controls.target.set(0, familyViewCenterY, 0);
 controls.minDistance = 330;
 controls.maxDistance = 1450;
 controls.minZoom = 0.45;
@@ -65,7 +68,10 @@ const flowAnimations = [];
 const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 const colors = { daniel: new THREE.Color('#087fa5'), camille: new THREE.Color('#cf4f79') };
 const childPalette = ['#488f73', '#b67a37', '#7864a6', '#518a9d'].map(color => new THREE.Color(color));
-const familyLayout = { parentScale: 0.62, childScale: 0.42, parentRadius: 0, childRadius: 225, childSpacing: 190 };
+const familyLayout = { parentScale: parentChartScale, childScale: 0.42, parentRadius: 0 };
+function childPlaneRadius() {
+  return Number(document.querySelector('#separation').value) / 2;
+}
 function chartColor(person) {
   if (colors[person]) return colors[person];
   const childIndex = Math.max(0, familyChildren.findIndex(child => child.id === person));
@@ -620,10 +626,10 @@ function makePlaneGroup(paths, person, sharedChannels, relationshipChannels, opt
   }
   // SVG coordinates use a downward-positive Y axis. Flip the finished plane so the chart reads upright in 3D.
   group.scale.y = -1;
-  group.position.set(-194.4, 194.4, 0);
+  group.position.set(-194.4, chartViewHeight, 0);
   if (options.scale) {
     group.scale.set(options.scale, -options.scale, options.scale);
-    group.position.set(-194.4 * options.scale + (options.offsetX || 0), 194.4 * options.scale + (options.offsetY || 0), 0);
+    group.position.set(-194.4 * options.scale + (options.offsetX || 0), chartViewHeight * options.scale + (options.offsetY || 0), 0);
   }
   return group;
 }
@@ -674,18 +680,30 @@ function chartPointInFamily(point, person) {
   const childIndex = familyChildren.findIndex(child => child.id === person);
   const isChild = childIndex >= 0;
   const scale = isChild ? familyLayout.childScale : familyLayout.parentScale;
-  let centerX = 0, centerY = 0;
+  let centerX = 0, centerY = 0, centerZ = 0, childAngle = 0;
   if (isChild) {
     const side = childIndex % 2 === 0 ? 1 : -1;
-    const row = Math.floor(childIndex / 2);
-    centerX = side * familyLayout.childRadius;
-    centerY = row === 0 ? 0 : -95 * Math.ceil(row / 2) * (row % 2 ? 1 : -1);
+    const childOrdinal = Math.floor(childIndex / 2);
+    const sideCount = side > 0 ? Math.ceil(familyChildren.length / 2) : Math.floor(familyChildren.length / 2);
+    const offset = sideCount > 1 ? (childOrdinal / (sideCount - 1) - 0.5) * (Math.PI / 3) : 0;
+    childAngle = side > 0 ? offset : Math.PI - offset;
+    centerX = childPlaneRadius() * Math.cos(childAngle);
+    centerZ = childPlaneRadius() * Math.sin(childAngle);
   } else {
     centerY = person === 'daniel' ? familyLayout.parentRadius : -familyLayout.parentRadius;
   }
+  const localX = point.x * scale - 194.4 * scale;
+  const localY = -point.y * scale + chartViewHeight * scale + centerY;
+  if (isChild) {
+    return new THREE.Vector3(
+      centerX + Math.cos(childAngle) * localX,
+      localY,
+      centerZ - Math.sin(childAngle) * localX
+    );
+  }
   return new THREE.Vector3(
-    point.x * scale - 194.4 * scale + centerX,
-    -point.y * scale + 194.4 * scale + centerY,
+    localX + centerX,
+    localY,
     0
   );
 }
@@ -936,7 +954,7 @@ function rebuildRelationship() {
       const group = makeTransitGroup(transitData, transitSnapshot, natalGates, person);
       const centerY = person === 'daniel' ? familyLayout.parentRadius : -familyLayout.parentRadius;
       group.scale.set(familyLayout.parentScale, -familyLayout.parentScale, familyLayout.parentScale);
-      group.position.set(-194.4 * familyLayout.parentScale, 194.4 * familyLayout.parentScale + centerY, 0);
+      group.position.set(-194.4 * familyLayout.parentScale, chartViewHeight * familyLayout.parentScale + centerY, 0);
       group.position.z = planeGroups[person].position.z;
       transitGroups[person] = group;
       chartRoot.add(group);
@@ -945,21 +963,24 @@ function rebuildRelationship() {
   }
   familyChildren.forEach((child, index) => {
     const side = index % 2 === 0 ? 1 : -1;
-    const distance = familyLayout.childRadius + Math.floor(index / 2) * familyLayout.childSpacing;
-    const offsetX = side * distance;
+    const childOrdinal = Math.floor(index / 2);
+    const sideCount = side > 0 ? Math.ceil(familyChildren.length / 2) : Math.floor(familyChildren.length / 2);
+    const spread = sideCount > 1 ? (childOrdinal / (sideCount - 1) - 0.5) * (Math.PI / 3) : 0;
+    const angle = side > 0 ? spread : Math.PI - spread;
+    const distance = childPlaneRadius();
+    const offsetX = Math.cos(angle) * distance;
+    const offsetZ = Math.sin(angle) * distance;
     const offsetY = 0;
-    const halfChild = 194.4 * familyLayout.childScale;
     const childPosition = new THREE.Group();
-    childPosition.position.set(offsetX, halfChild + offsetY, 0);
-    childPosition.rotation.y = side > 0 ? -Math.PI / 2 : Math.PI / 2;
+    childPosition.position.set(offsetX, offsetY, offsetZ);
+    childPosition.rotation.y = Math.atan2(-offsetX, -offsetZ);
     const childData = loader.parse(extractLayer(sourceDocument, 'daniel', new Set(child.gates)));
     const color = childPalette[index % childPalette.length];
     const childGroup = makePlaneGroup(childData.paths, child.id, new Set(), new Set(), {
       color, name: child.name, scale: familyLayout.childScale
     });
-    childGroup.position.set(-halfChild, 0, 0);
+    childGroup.position.set(-194.4 * familyLayout.childScale, chartViewHeight * familyLayout.childScale, 0);
     childPosition.add(childGroup);
-    childPosition.position.z = 0;
     familyGroups[child.id] = childPosition;
     chartRoot.add(childPosition);
     if (transitSnapshot) {
@@ -967,7 +988,7 @@ function rebuildRelationship() {
       const transitData = loader.parse(extractLayer(sourceDocument, 'daniel', activations));
       const transitGroup = makeTransitGroup(transitData, transitSnapshot, new Set(child.gates), child.id);
       transitGroup.scale.set(familyLayout.childScale, -familyLayout.childScale, familyLayout.childScale);
-      transitGroup.position.set(-halfChild, 0, 0);
+      transitGroup.position.set(-194.4 * familyLayout.childScale, chartViewHeight * familyLayout.childScale, 0);
       transitGroups[child.id] = transitGroup;
       childPosition.add(transitGroup);
       transitGroup.visible = transitToggle.checked;
@@ -1008,10 +1029,9 @@ function resize() {
   if (!rect.width || !rect.height) return;
   renderer.setSize(rect.width, rect.height, false);
   const aspect = rect.width / rect.height;
-  const childrenPerSide = Math.ceil(familyChildren.length / 2);
-  const furthestChild = familyLayout.childRadius + Math.max(0, childrenPerSide - 1) * familyLayout.childSpacing;
+  const furthestChild = childPlaneRadius();
   const halfWidth = Math.max(300 * aspect, furthestChild + 194.4 * familyLayout.childScale + 35, 165);
-  const halfHeight = Math.max(194.4 * familyLayout.parentScale + 35, 194.4 * familyLayout.childScale + 35, halfWidth / aspect);
+  const halfHeight = Math.max(chartViewHeight * familyLayout.parentScale / 2 + 35, chartViewHeight * familyLayout.childScale / 2 + 35, halfWidth / aspect);
   camera.left = -halfWidth;
   camera.right = halfWidth;
   camera.top = halfHeight;
@@ -1023,7 +1043,10 @@ function setSeparation(value) {
   if (planeGroups.daniel) planeGroups.daniel.position.z = frontPerson === 'daniel' ? half : -half;
   if (planeGroups.camille) planeGroups.camille.position.z = -planeGroups.daniel.position.z;
   document.querySelector('#separationValue').value = String(value);
-  if (sourceDocument) rebuildRelationship();
+  if (sourceDocument) {
+    rebuildRelationship();
+    resize();
+  }
 }
 function orient(mode) {
   exactFrontAlignment = mode !== 'edge';
@@ -1032,9 +1055,9 @@ function orient(mode) {
   controls.minPolarAngle = 0;
   controls.maxPolarAngle = Math.PI;
   controls.reset();
-  if (mode === 'edge') camera.position.set(800, 0, 0.01);
-  else camera.position.set(0, 0, 820);
-  controls.target.set(0, 0, 0);
+  if (mode === 'edge') camera.position.set(800, familyViewCenterY, 0.01);
+  else camera.position.set(0, familyViewCenterY, 820);
+  controls.target.set(0, familyViewCenterY, 0);
   lockOrbitElevation();
   controls.update();
 }
