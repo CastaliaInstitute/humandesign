@@ -113,11 +113,18 @@ function summarizeChart(gates, activations) {
   else if (definedCenters.has('ego')) authority = 'Ego';
   else if (definedCenters.has('g') && centersConnected('g', 'throat')) authority = 'Self-Projected';
   else if (type === 'Reflector') authority = 'Lunar';
+  const strategies = {
+    Manifestor: 'inform before initiating',
+    Generator: 'wait to respond',
+    'Manifesting Generator': 'respond, then inform before acting',
+    Projector: 'wait for recognition and invitation',
+    Reflector: 'take time through a lunar cycle for major decisions'
+  };
   const personalitySun = activations.find(item => item.type === 'personality' && item.planet === 'sun');
   const designSun = activations.find(item => item.type === 'design' && item.planet === 'sun');
   const profile = personalitySun && designSun ? `${personalitySun.line}/${designSun.line}` : '';
   return {
-    type, authority, profile, definedCenters: [...definedCenters], definedChannels,
+    type, authority, strategy: strategies[type], profile, definedCenters: [...definedCenters], definedChannels,
     label: `${profile ? `${profile} · ` : ''}${authority} ${type}`
   };
 }
@@ -140,7 +147,7 @@ function frontFamilyReading() {
     'daniel', 'camille', ...familyChildren.map(child => child.id)
   ].map(person => {
     const chart = summarizeChart(gates.get(person) || gatesFor(person), activations(person));
-    return chart ? `${personName(person)}: ${chart.label}` : '';
+    return chart ? `${personName(person)}: ${chart.label}; strategy: ${chart.strategy}` : '';
   }).filter(Boolean);
   const profileLine = document.createElement('p');
   profileLine.textContent = profiles.join(' · ');
@@ -148,7 +155,7 @@ function frontFamilyReading() {
 
   const centerNames = summary.definedCenters.map(center => centerDescriptions[center]?.[0] || center);
   const intro = document.createElement('p');
-  intro.textContent = `In front: ${frontName} · ${summary.label}. ${summary.definedChannels.length} defined channels connect ${centerNames.length ? `${centerNames.length} centers (${centerNames.join(', ')})` : 'no centers'} in this chart.`;
+  intro.textContent = `In front: ${frontName} · ${summary.label}. Human Design strategy: ${summary.strategy}. Defined centers: ${centerNames.join(', ') || 'none'}; defined channels: ${summary.definedChannels.length}.`;
   root.append(intro);
 
   const channels = [...sourceDocument.querySelectorAll('.person--daniel .channel-group[data-from][data-to]')].map(channel => {
@@ -158,6 +165,7 @@ function frontFamilyReading() {
   });
   for (const peer of peers) {
     const frontGates = gates.get(frontPerson), peerGates = gates.get(peer);
+    const peerSummary = summarizeChart(peerGates, activations(peer));
     const sharedGates = [...frontGates].filter(gate => peerGates.has(gate)).sort((a, b) => a - b);
     const sharedChannels = channels.filter(channel => frontGates.has(channel.from) && frontGates.has(channel.to) && peerGates.has(channel.from) && peerGates.has(channel.to));
     const complementary = channels.filter(channel => {
@@ -174,11 +182,18 @@ function frontFamilyReading() {
     if (sharedChannels.length) facts.push(`both charts define ${sharedChannels.map(channel => channel.label).join(', ')}`);
     if (frontCompletePeerGate.length) facts.push(`${peerName(peer)} has the other gate of ${frontCompletePeerGate.map(channel => channel.label).join(', ')}, already defined in ${frontName}'s chart`);
     if (peerCompleteFrontGate.length) facts.push(`${frontName} has a gate in ${peerName(peer)}'s complete ${peerCompleteFrontGate.map(channel => channel.label).join(', ')}`);
+    const peerDefines = new Set(peerSummary?.definedCenters || []);
+    const frontDefines = new Set(summary.definedCenters);
+    const peerToFront = [...peerDefines].filter(center => !frontDefines.has(center));
+    const frontToPeer = [...frontDefines].filter(center => !peerDefines.has(center));
+    const centerName = center => centerDescriptions[center]?.[0] || center;
+    if (peerToFront.length) facts.push(`conditioning lens: ${peerName(peer)} has defined ${peerToFront.map(centerName).join(', ')} center${peerToFront.length === 1 ? '' : 's'} where ${frontName}'s are not defined`);
+    if (frontToPeer.length) facts.push(`${frontName} has defined ${frontToPeer.map(centerName).join(', ')} center${frontToPeer.length === 1 ? '' : 's'} where ${peerName(peer)}'s are not defined`);
     item.textContent = `With ${peerName(peer)}: ${facts.join('; ')}.`;
     root.append(item);
   }
   const note = document.createElement('small');
-  note.textContent = 'Natal chart comparison; current transits are excluded. This describes chart connections, not a compatibility verdict.';
+  note.textContent = 'A Human Design parenting lens: use strategy and center contrasts as questions for reflection, not fixed claims about a person. Current transits are excluded; this is not a compatibility verdict.';
   root.append(note);
 }
 const pale = new THREE.Color('#fffcf5');
