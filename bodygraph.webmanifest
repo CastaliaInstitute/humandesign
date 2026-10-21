@@ -1,0 +1,17 @@
+{
+  "id": "/bodygraph-app.html",
+  "name": "Castalia Human Design BodyGraph",
+  "short_name": "BodyGraph",
+  "description": "Explore your Human Design BodyGraph and energy flow.",
+  "start_url": "/bodygraph-app.html",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#000000",
+  "theme_color": "#000000",
+  "icons": [
+    {"src": "/bodygraph-icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any"},
+    {"src": "/bodygraph-icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable"},
+    {"src": "/bodygraph-icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable"}
+  ]
+}

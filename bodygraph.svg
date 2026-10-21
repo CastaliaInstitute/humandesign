@@ -134,14 +134,15 @@ function showTooltip(item,event){
  const reference=item.matches('.gate')?`Gate ${item.dataset.gate}`:`Channel ${item.dataset.channel}`;
  const words=(reference+' '+detail).split(/\s+/),lines=[];let line='';
  words.forEach(word=>{const candidate=line?line+' '+word:word;if(candidate.length>42&&line){lines.push(line);line=word;}else line=candidate;});if(line)lines.push(line);
+ const viewBox=svg.viewBox.baseVal;
  while(tooltipText.firstChild)tooltipText.removeChild(tooltipText.firstChild);
  lines.forEach((value,index)=>{const span=document.createElementNS('http://www.w3.org/2000/svg','tspan');span.setAttribute('x','0');span.setAttribute('dy',index?'8':'0');span.textContent=value;tooltipText.appendChild(span);});
- const width=190,height=12+lines.length*8;tooltipRect.setAttribute('width',width);tooltipRect.setAttribute('height',height);tooltipText.setAttribute('transform','translate(6 9)');
+ const width=Math.min(190,viewBox.width-16),height=12+lines.length*8;tooltipRect.setAttribute('width',width);tooltipRect.setAttribute('height',height);tooltipText.setAttribute('transform','translate(6 9)');
  let screenX,screenY;if(event.type==='focusin'){const box=item.getBoundingClientRect();screenX=box.left+box.width/2;screenY=box.top+box.height/2;}else{screenX=event.clientX;screenY=event.clientY;}
- const bounds=svg.getBoundingClientRect();let anchorX=(screenX-bounds.left)*360/(bounds.width||360),anchorY=(screenY-bounds.top)*360/(bounds.height||360);
+ const bounds=svg.getBoundingClientRect();let anchorX=(screenX-bounds.left)*viewBox.width/(bounds.width||viewBox.width)+viewBox.x,anchorY=(screenY-bounds.top)*viewBox.height/(bounds.height||viewBox.height)+viewBox.y;
  if(!Number.isFinite(anchorX))anchorX=180;if(!Number.isFinite(anchorY))anchorY=180;
- const margin=8,maxX=360-width-margin,maxY=360-height-margin;const x=maxX;let y=anchorY+12;
- if(y>maxY)y=anchorY-height-12;y=Math.max(margin,Math.min(maxY,y));
+ const margin=8,minX=viewBox.x+margin,maxX=viewBox.x+viewBox.width-width-margin,maxY=viewBox.y+viewBox.height-height-margin;const x=Math.max(minX,maxX);let y=anchorY+12;
+ if(y>maxY)y=anchorY-height-12;y=Math.max(viewBox.y+margin,Math.min(maxY,y));
  tooltip.setAttribute('transform',`translate(${x} ${y})`);tooltip.classList.add('is-visible');tooltip.setAttribute('aria-hidden','false');
 }
 let showAllFlow=true;
@@ -264,7 +265,8 @@ function activate(el){
 }
 function fromTarget(target){return target instanceof Element?target.closest(interactive):null;}
 function updateZoomLabels(){const zoom=svg.getScreenCTM()?.a||1;svg.querySelectorAll('.gate-number').forEach(label=>label.classList.toggle('is-zoomed',zoom>=3));}
-updateZoomLabels();window.addEventListener('resize',updateZoomLabels);window.CastaliaHumanDesignTransit?.installSvg(svg);
+function fitMobileViewport(){const width=window.innerWidth||360,height=window.innerHeight||360,aspect=width/height;if(aspect<.72){const viewWidth=360*aspect;svg.setAttribute('viewBox',`${180-viewWidth/2} 0 ${viewWidth} 360`);}else svg.setAttribute('viewBox','0 0 360 360');updateZoomLabels();}
+fitMobileViewport();window.addEventListener('resize',fitMobileViewport,{passive:true});window.CastaliaHumanDesignTransit?.installSvg(svg);
 svg.addEventListener('pointerover',event=>{const item=fromTarget(event.target);if(item){activate(item);showTooltip(item,event);}});
 svg.addEventListener('pointerout',event=>{const item=fromTarget(event.target);if(item&&!item.contains(event.relatedTarget)){const next=fromTarget(event.relatedTarget);if(next){activate(next);showTooltip(next,event);}else{clear();hideTooltip();}}});
 svg.addEventListener('focusin',event=>{const item=fromTarget(event.target);if(item){activate(item);showTooltip(item,event);}});

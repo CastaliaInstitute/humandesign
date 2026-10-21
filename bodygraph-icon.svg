@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="112" fill="#050608"/>
+  <g fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <g stroke-width="9" opacity=".9">
+      <path d="M256 118v28M256 205v30M256 310v28M210 286 151 338M302 286l59 52M151 382l55 35M361 382l-55 35M256 394v28" stroke="#728093"/>
+      <path d="M256 118v28" stroke="#a66be0"/><path d="M256 205v30" stroke="#54a8e8"/>
+      <path d="M256 310v28" stroke="#47b66c"/><path d="M151 382l55 35" stroke="#e2ca4b"/>
+      <path d="M361 382l-55 35" stroke="#e2ca4b"/><path d="M256 394v28" stroke="#ed703b"/>
+    </g>
+    <path d="m256 48 59 102H197z" fill="#a66be0" fill-opacity=".2" stroke="#a66be0" stroke-width="9"/>
+    <path d="m197 158h118l-59 94z" fill="#4380ca" fill-opacity=".2" stroke="#4380ca" stroke-width="9"/>
+    <rect x="211" y="240" width="90" height="76" rx="16" fill="#4e91c6" fill-opacity=".18" stroke="#4e91c6" stroke-width="9"/>
+    <path d="m256 321 61 49-61 49-61-49z" fill="#63aa66" fill-opacity=".2" stroke="#63aa66" stroke-width="9"/>
+    <path d="m201 350-59-24v82l59-24z" fill="#e2ca4b" fill-opacity=".18" stroke="#e2ca4b" stroke-width="9"/>
+    <path d="m311 350 59-24v82l-59-24z" fill="#e2ca4b" fill-opacity=".18" stroke="#e2ca4b" stroke-width="9"/>
+    <path d="m314 390 43 23-43 24z" fill="#63aa66" fill-opacity=".2" stroke="#63aa66" stroke-width="9"/>
+    <rect x="218" y="420" width="76" height="54" rx="12" fill="#ed703b" fill-opacity=".2" stroke="#ed703b" stroke-width="9"/>
+    <rect x="222" y="477" width="68" height="25" rx="10" fill="#c72d3a" fill-opacity=".2" stroke="#c72d3a" stroke-width="9"/>
+  </g>
+  <g fill="#f5a742" stroke="#08090b" stroke-width="4">
+    <circle cx="231" cy="147" r="7"/><circle cx="256" cy="147" r="7"/><circle cx="281" cy="147" r="7"/>
+    <circle cx="223" cy="158" r="7"/><circle cx="256" cy="158" r="7"/><circle cx="289" cy="158" r="7"/>
+    <circle cx="222" cy="240" r="7"/><circle cx="256" cy="240" r="7"/><circle cx="290" cy="240" r="7"/>
+    <circle cx="211" cy="278" r="7"/><circle cx="301" cy="278" r="7"/>
+    <circle cx="256" cy="321" r="7"/><circle cx="198" cy="350" r="7"/><circle cx="314" cy="350" r="7"/>
+    <circle cx="218" cy="420" r="7"/><circle cx="256" cy="420" r="7"/><circle cx="294" cy="420" r="7"/>
+    <circle cx="222" cy="477" r="7"/><circle cx="256" cy="477" r="7"/><circle cx="290" cy="477" r="7"/>
+  </g>
+</svg>
