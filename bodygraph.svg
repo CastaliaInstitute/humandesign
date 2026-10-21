@@ -178,6 +178,8 @@ function setLaneGeometry(){
   group.querySelectorAll('path').forEach(path=>path.setAttribute('d',d));
  });
 }
+function spreadCentersVertically(){const centers=Array.from(svg.querySelectorAll('.center')),topCenter=centers.find(center=>center.dataset.center==='head'),topTransform=topCenter?.getAttribute('transform')||'',topY=Number(topTransform.match(/translate\([^\s]+\s+(-?[\d.]+)/)?.[1]||0);centers.forEach(center=>{const transform=center.getAttribute('transform')||'',base=center.dataset.baseTransform||transform,match=base.match(/translate\([^\s]+\s+(-?[\d.]+)/),centerY=Number(match?.[1]||topY),offset=(centerY-topY)*.18;center.dataset.baseTransform=base;center.setAttribute('transform',`translate(0 ${offset.toFixed(3)}) ${base}`);});}
+spreadCentersVertically();
 positionGatesOnCenterBorders();
 setLaneGeometry();
 function centerBaseColor(center){const shape=center?.querySelector('.center-shape');return shape?.getAttribute('data-base-fill')||shape?.getAttribute('fill')||'#888888';}
@@ -266,7 +268,7 @@ function activate(el){
 }
 function fromTarget(target){return target instanceof Element?target.closest(interactive):null;}
 function updateZoomLabels(){const zoom=svg.getScreenCTM()?.a||1;svg.querySelectorAll('.gate-number').forEach(label=>label.classList.toggle('is-zoomed',zoom>=3));}
-function fitMobileViewport(){const width=window.innerWidth||360,height=window.innerHeight||360,aspect=width/height,graph=svg.getElementById('bodygraph-art');if(aspect<.72){const viewWidth=360*aspect;svg.setAttribute('viewBox',`${180-viewWidth/2} 0 ${viewWidth} 360`);}else svg.setAttribute('viewBox','0 0 360 360');graph?.setAttribute('transform','translate(-72 0) scale(1.4 1)');updateZoomLabels();}
+function fitMobileViewport(){const width=window.innerWidth||360,height=window.innerHeight||360,aspect=width/height,graph=svg.getElementById('bodygraph-art'),viewHeight=400;if(aspect<.72){const viewWidth=viewHeight*aspect;svg.setAttribute('viewBox',`${180-viewWidth/2} 0 ${viewWidth} ${viewHeight}`);}else svg.setAttribute('viewBox',`0 0 360 ${viewHeight}`);graph?.setAttribute('transform','translate(-72 0) scale(1.4 1)');updateZoomLabels();}
 window.addEventListener('resize',fitMobileViewport,{passive:true});window.CastaliaHumanDesignTransit?.installSvg(svg);
 svg.addEventListener('pointerover',event=>{const item=fromTarget(event.target);if(item){activate(item);showTooltip(item,event);}});
 svg.addEventListener('pointerout',event=>{const item=fromTarget(event.target);if(item&&!item.contains(event.relatedTarget)){const next=fromTarget(event.relatedTarget);if(next){activate(next);showTooltip(next,event);}else{clear();hideTooltip();}}});
