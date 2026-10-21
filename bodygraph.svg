@@ -187,7 +187,7 @@ setLaneGeometry();
 function centerBaseColor(center){const shape=center?.querySelector('.center-shape');return shape?.getAttribute('data-base-fill')||shape?.getAttribute('fill')||'#888888';}
 function setFlowDirections(){
  const defs=svg.querySelector('defs'),ns='http://www.w3.org/2000/svg',art=svg.getElementById('bodygraph-art');
- let arrowLayer=svg.getElementById('channel-arrowhead-layer');if(!arrowLayer){arrowLayer=document.createElementNS(ns,'g');arrowLayer.id='channel-arrowhead-layer';arrowLayer.setAttribute('pointer-events','none');}art?.appendChild(arrowLayer);arrowLayer.replaceChildren();
+ let arrowLayer=svg.getElementById('channel-arrowhead-layer');if(!arrowLayer){arrowLayer=document.createElementNS(ns,'g');arrowLayer.id='channel-arrowhead-layer';arrowLayer.setAttribute('pointer-events','none');}const firstChannel=art?.querySelector('.channel-group');if(firstChannel)art.insertBefore(arrowLayer,firstChannel);else art?.appendChild(arrowLayer);arrowLayer.replaceChildren();
  svg.querySelectorAll('.channel-group').forEach(group=>{
   const main=group.querySelector('.channel-flow'),line=group.querySelector('.channel');if(!main||!line)return;
   const a=main.getPointAtLength(0),b=main.getPointAtLength(main.getTotalLength()),fromGate=svg.getElementById('gate-'+group.dataset.from),toGate=svg.getElementById('gate-'+group.dataset.to),fromMarker=fromGate?.querySelector('.gate-marker'),toMarker=toGate?.querySelector('.gate-marker');if(!fromMarker||!toMarker)return;
