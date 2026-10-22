@@ -74,6 +74,7 @@ function rotateFamily(step) {
   refreshFrontFamilyReading();
 }
 const planeGroups = {};
+const chartInitials = new Map();
 let relationshipGroup = null;
 let activeRelationshipPairKey = '';
 let lastRelationshipFacingAngle = null;
@@ -165,6 +166,46 @@ function addChartColorShadow(group, color) {
   shadow.renderOrder = -1;
   shadow.userData.chartColorShadow = true;
   group.add(shadow);
+}
+function clearChartInitials() {
+  for (const { sprite } of chartInitials.values()) {
+    scene.remove(sprite);
+    sprite.material.map?.dispose();
+    sprite.material.dispose();
+  }
+  chartInitials.clear();
+}
+function addChartInitial(person, initial, color) {
+  const canvas = document.createElement('canvas');
+  canvas.width = 192;
+  canvas.height = 112;
+  const context = canvas.getContext('2d');
+  if (!context) return;
+  context.textAlign = 'center';
+  context.textBaseline = 'middle';
+  context.font = '700 76px system-ui, sans-serif';
+  context.shadowColor = color.getStyle();
+  context.shadowBlur = 18;
+  context.fillStyle = color.getStyle();
+  context.fillText(initial, 96, 54);
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  const label = new THREE.Sprite(new THREE.SpriteMaterial({ map: texture, transparent: true, depthTest: false, depthWrite: false, toneMapped: false }));
+  label.scale.set(42, 25, 1);
+  label.name = `${initial} chart initial`;
+  label.renderOrder = 20;
+  scene.add(label);
+  chartInitials.set(person, { sprite: label });
+}
+function syncChartInitials() {
+  chartRoot.updateMatrixWorld(true);
+  for (const [person, { sprite }] of chartInitials) {
+    const point = chartPointInFamily({ x: 180, y: chartViewHeight + 22 }, person);
+    sprite.position.copy(chartRoot.localToWorld(point));
+    sprite.visible = person === 'daniel' ? (planeGroups.daniel?.visible ?? true)
+      : person === 'camille' ? (planeGroups.camille?.visible ?? true)
+        : (familyGroups[person]?.visible ?? true);
+  }
 }
 function chartTextColor(person) {
   // Darken the chart swatch for readable text on the light reading panel.
@@ -1599,6 +1640,7 @@ function makePlaneGroup(paths, person, sharedChannels, relationshipChannels, opt
     }
   }
   addCenterParticleAnimations(group, paths);
+  addChartInitial(person, owner.trim().charAt(0).toUpperCase(), color);
   // The embedded SVG is the visual source of truth. Keep the traced Three.js
   // geometry as invisible raycast targets for existing chart interactions.
   group.traverse(object => {
@@ -1730,7 +1772,7 @@ function overlappingChartPairs() {
     const halfWidth = chartSilhouetteWidth / 2;
     const corners = [
       { x: 180 - halfWidth, y: 0 }, { x: 180 + halfWidth, y: 0 },
-      { x: 180 - halfWidth, y: chartViewHeight }, { x: 180 + halfWidth, y: chartViewHeight }
+      { x: 180 - halfWidth, y: chartViewHeight + 34 }, { x: 180 + halfWidth, y: chartViewHeight + 34 }
     ].map(point => camera.worldToLocal(chartRoot.localToWorld(chartPointInFamily(point, person))));
     return {
       person,
@@ -1979,6 +2021,7 @@ function rebuildRelationship() {
     setStatus('Calculating parent natal charts…');
     return;
   }
+  clearChartInitials();
   clearCenterParticleAnimations();
   flowAnimations.length = 0;
   const danielGates = parseGateList('#danielGates');
@@ -2669,6 +2712,7 @@ function animate() {
   }
   controls.update();
   syncChartFacing();
+  syncChartInitials();
   refreshRelationshipPairing();
   const cameraOffset = camera.position.clone().sub(controls.target);
   const cameraAzimuth = Math.atan2(cameraOffset.x, cameraOffset.z);
