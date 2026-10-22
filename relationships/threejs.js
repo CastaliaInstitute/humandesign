@@ -1635,26 +1635,28 @@ function overlappingChartPairs() {
     if (person === 'camille') return planeGroups.camille?.visible ?? true;
     return familyGroups[person]?.visible ?? true;
   }).map(person => {
-    const center = chartPointInFamily({ x: 180, y: chartViewHeight / 2 }, person);
-    const screen = camera.worldToLocal(chartRoot.localToWorld(center));
-    return { person, x: screen.x, y: screen.y };
+    const halfWidth = chartSilhouetteWidth / 2;
+    const corners = [
+      { x: 180 - halfWidth, y: 0 }, { x: 180 + halfWidth, y: 0 },
+      { x: 180 - halfWidth, y: chartViewHeight }, { x: 180 + halfWidth, y: chartViewHeight }
+    ].map(point => camera.worldToLocal(chartRoot.localToWorld(chartPointInFamily(point, person))));
+    return {
+      person,
+      bounds: {
+        left: Math.min(...corners.map(point => point.x)),
+        right: Math.max(...corners.map(point => point.x)),
+        top: Math.min(...corners.map(point => point.y)),
+        bottom: Math.max(...corners.map(point => point.y))
+      }
+    };
   });
   const pairs = [];
-  const chartBounds = person => {
-    const isChild = familyChildren.some(child => child.id === person);
-    const scale = isChild ? familyLayout.childScale : familyLayout.parentScale;
-    return {
-      halfWidth: chartSilhouetteWidth * scale / 2,
-      halfHeight: chartViewHeight * scale / 2
-    };
-  };
   for (let i = 0; i < candidates.length; i++) {
     for (let j = i + 1; j < candidates.length; j++) {
       const a = candidates[i], b = candidates[j];
-      const aBounds = chartBounds(a.person), bBounds = chartBounds(b.person);
       if (
-        Math.abs(a.x - b.x) < aBounds.halfWidth + bBounds.halfWidth &&
-        Math.abs(a.y - b.y) < aBounds.halfHeight + bBounds.halfHeight
+        Math.min(a.bounds.right, b.bounds.right) > Math.max(a.bounds.left, b.bounds.left) &&
+        Math.min(a.bounds.bottom, b.bounds.bottom) > Math.max(a.bounds.top, b.bounds.top)
       ) pairs.push([a.person, b.person]);
     }
   }
@@ -1684,7 +1686,7 @@ function refreshRelationshipPairing(force = false) {
     if (flowAnimations[i].bead.parent === relationshipGroup) flowAnimations.splice(i, 1);
   }
   releaseGroup(relationshipGroup);
-  relationshipGroup = makeRelationshipGroup(currentChartData, currentNatalGates, currentTransitSnapshot, visibleFamilyPairs());
+  relationshipGroup = makeRelationshipGroup(currentChartData, currentNatalGates, currentTransitSnapshot, pairs);
   chartRoot.add(relationshipGroup);
   relationshipGroup.visible = document.querySelector('#showBridges').checked;
   if (pairChanged) {
@@ -1987,7 +1989,7 @@ function rebuildRelationship() {
   currentTransitSnapshot = activeTransitSnapshot;
   releaseGroup(relationshipGroup);
   activeRelationshipPairKey = overlapPairs.map(pair => pair.join(':')).sort().join('|');
-  relationshipGroup = makeRelationshipGroup(chartData, natalGates, activeTransitSnapshot, exchangePairs);
+  relationshipGroup = makeRelationshipGroup(chartData, natalGates, activeTransitSnapshot, overlapPairs);
   chartRoot.add(relationshipGroup);
   relationshipGroup.visible = document.querySelector('#showBridges').checked;
   planeGroups.daniel.visible = document.querySelector('#showDaniel').checked;
