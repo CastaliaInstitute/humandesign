@@ -102,6 +102,37 @@ try {
 let sourceDocument = null;
 let featureDocument = null;
 let loader = null;
+async function loadBodygraphTemplate(url) {
+  // bodygraph.svg lays out gate markers and channel splines in its inline SVG
+  // script. Parsing the fetched XML directly skips that script, leaving the
+  // heart gates at their old placeholder coordinates and breaking their
+  // channels in the family planes. Load it once as a real SVG document, let
+  // its own geometry pass run, then parse the resulting markup for Three.js.
+  const frame = document.createElement('iframe');
+  frame.setAttribute('aria-hidden', 'true');
+  frame.tabIndex = -1;
+  frame.title = '';
+  frame.style.cssText = 'position:fixed;left:-10000px;top:0;width:360px;height:360px;border:0;opacity:0;pointer-events:none';
+  const loaded = new Promise((resolve, reject) => {
+    frame.addEventListener('load', resolve, { once: true });
+    frame.addEventListener('error', () => reject(new Error('bodygraph.svg could not be rendered')), { once: true });
+  });
+  frame.src = url;
+  document.body.append(frame);
+  try {
+    await loaded;
+    // The SVG's synchronous layout script needs a rendered frame for screen
+    // transforms used when routing channels along center walls.
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    const svg = frame.contentDocument?.documentElement;
+    if (!svg || svg.localName !== 'svg') throw new Error('bodygraph.svg did not produce an SVG document');
+    const parsed = new DOMParser().parseFromString(new XMLSerializer().serializeToString(svg), 'image/svg+xml');
+    if (parsed.querySelector('parsererror')) throw new Error('bodygraph.svg layout could not be parsed');
+    return parsed;
+  } finally {
+    frame.remove();
+  }
+}
 function templatePerson(person = 'daniel') {
   return sourceDocument?.querySelector(person === 'daniel' ? '.person--daniel' : '.person--camille')
     || sourceDocument?.querySelector('#bodygraph-art')
@@ -2654,10 +2685,7 @@ function loadFeatureDescriptions(svgDocument) {
 
 async function init() {
   try {
-    const response = await fetch('../bodygraph.svg?v=family-active-tint-20261022');
-    if (!response.ok) throw new Error(`bodygraph.svg returned ${response.status}`);
-    sourceDocument = new DOMParser().parseFromString(await response.text(), 'image/svg+xml');
-    if (sourceDocument.querySelector('parsererror')) throw new Error('bodygraph.svg could not be parsed');
+    sourceDocument = await loadBodygraphTemplate('../bodygraph.svg?v=family-active-tint-20261022');
     try {
       const descriptionsResponse = await fetch('../bodygraph.svg?v=family-active-tint-20261022');
       if (descriptionsResponse.ok) {
