@@ -862,6 +862,19 @@ function addShapeMesh(target, shape, material, z, hover = null) {
   target.add(mesh);
   return mesh;
 }
+function curveFromSvgSubPath(subPath, z, reverse = false) {
+  const curve = new THREE.Curve();
+  curve.getPoint = (t, target = new THREE.Vector3()) => {
+    const point = subPath.getPointAt(reverse ? 1 - THREE.MathUtils.clamp(t, 0, 1) : THREE.MathUtils.clamp(t, 0, 1));
+    return target.set(point.x, point.y, z);
+  };
+  curve.getTangent = (t, target = new THREE.Vector3()) => {
+    const tangent = subPath.getTangentAt(reverse ? 1 - THREE.MathUtils.clamp(t, 0, 1) : THREE.MathUtils.clamp(t, 0, 1));
+    if (reverse) tangent.negate();
+    return target.set(tangent.x, tangent.y, 0).normalize();
+  };
+  return curve;
+}
 function tubeFromPoints(points, radius, material, z) {
   if (points.length < 2) return null;
   const curve = new THREE.CatmullRomCurve3(points.map(p => new THREE.Vector3(p.x, p.y, z)), false, 'centripetal');
@@ -1190,6 +1203,39 @@ function describePathFeature(node, person, activationsByGate, transitSnapshot = 
 function lineMaterial(color, opacity=1) {
   return new THREE.MeshBasicMaterial({ color, transparent: opacity < 1, opacity, side: THREE.DoubleSide, depthWrite: false });
 }
+function addBodygraphSvgPlane(group, paths) {
+  const svgRoot = paths.find(path => path.userData?.node)?.userData.node.ownerSVGElement;
+  if (!svgRoot) return;
+  const artwork = svgRoot.cloneNode(true);
+  artwork.setAttribute('width', '360');
+  artwork.setAttribute('height', '360');
+  artwork.removeAttribute('style');
+  artwork.removeAttribute('role');
+  artwork.removeAttribute('aria-labelledby');
+  artwork.querySelectorAll('title,desc,text,script,.gate-number,.svg-tooltip,#gate-state-legend,#flow-control,#flow-direction-legend').forEach(node => node.remove());
+  artwork.querySelector('rect.canvas')?.remove();
+  const style = [...artwork.querySelectorAll('style')].at(-1);
+  if (style) style.textContent += `
+    .gate[data-state="open"] .gate-marker{fill:#000!important;stroke:#000!important;opacity:1!important;visibility:visible!important}
+    .gate[data-state="closed"] .gate-marker{fill:#f5a742!important;stroke:#613b13!important;stroke-width:1!important;opacity:1!important;visibility:visible!important}
+    .gate[data-state="closed"][data-activation*="design"] .gate-marker{stroke:#c92d3a!important}
+    .gate[data-state="closed"][data-activation*="personality"] .gate-marker{stroke:#272923!important}
+    .gate[data-state="closed"][data-activation*="design"][data-activation*="personality"] .gate-marker{stroke:#7c3aed!important}`;
+  const markup = new XMLSerializer().serializeToString(artwork);
+  const texture = new THREE.TextureLoader().load(`data:image/svg+xml;charset=utf-8,${encodeURIComponent(markup)}`);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.generateMipmaps = true;
+  texture.minFilter = THREE.LinearMipmapLinearFilter;
+  texture.magFilter = THREE.LinearFilter;
+  const plane = new THREE.Mesh(
+    new THREE.PlaneGeometry(360, 360),
+    new THREE.MeshBasicMaterial({ map: texture, toneMapped: false, transparent: true, side: THREE.DoubleSide, depthWrite: false })
+  );
+  plane.position.set(180, 180, 0);
+  plane.userData.svgArtwork = true;
+  plane.renderOrder = 0;
+  group.add(plane);
+}
 function makePlaneGroup(paths, person, sharedChannels, relationshipChannels, options = {}) {
   const group = new THREE.Group();
   const owner = options.name || window.hdChartNames?.[person] || (person === 'daniel' ? 'Person 1' : person === 'camille' ? 'Person 2' : 'Child');
@@ -1203,6 +1249,7 @@ function makePlaneGroup(paths, person, sharedChannels, relationshipChannels, opt
     if (!activationsByGate.has(activation.gate)) activationsByGate.set(activation.gate, []);
     activationsByGate.get(activation.gate).push(activation);
   }
+  addBodygraphSvgPlane(group, paths);
   const gatePoints = getGatePoints(paths);
   for (const path of paths) {
     const node = path.userData.node;
@@ -1214,7 +1261,7 @@ function makePlaneGroup(paths, person, sharedChannels, relationshipChannels, opt
     const active = channel?.getAttribute('data-defined') === 'true';
     const gateActive = gate?.getAttribute('data-state') === 'closed';
     const centerActive = center?.getAttribute('data-defined') === 'true';
-    const isChannel = cls.includes('channel') && !cls.includes('highlight') && !cls.includes('hit') && !cls.includes('flow');
+    const isChannel = cls.split(/\s+/).includes('channel');
     const isGateMarker = cls.includes('gate-marker');
     const isCenterShape = cls.includes('center-shape');
     const centerChannelCount = isCenterShape ? Number(center?.getAttribute('data-channel-count') || 0) : 0;
@@ -1242,14 +1289,10 @@ function makePlaneGroup(paths, person, sharedChannels, relationshipChannels, opt
         if (active && points.length > 2) {
           const from = gatePoints.get(+channel.dataset.from);
           const startsAtFrom = from && Math.hypot(rawPoints[0].x - from.x, rawPoints[0].y - from.y) <= Math.hypot(rawPoints[rawPoints.length - 1].x - from.x, rawPoints[rawPoints.length - 1].y - from.y);
-          let flowPoints = [...points];
-          if (startsAtFrom === false) flowPoints.reverse();
-          const isReturnLane = cls.split(/\s+/).includes('paired-rail');
-          if (isReturnLane) flowPoints.reverse();
-          const flowCurve = new THREE.CatmullRomCurve3(flowPoints.map(point => new THREE.Vector3(point.x, point.y, 4.3)), false, 'centripetal');
-          const [fromGate, toGate] = isReturnLane
+          const flowCurve = curveFromSvgSubPath(subPath, 4.3, startsAtFrom === false);
+          const [fromGate, toGate] = startsAtFrom === false
             ? [channel.dataset.to, channel.dataset.from]
-            : startsAtFrom === false ? [channel.dataset.to, channel.dataset.from] : [channel.dataset.from, channel.dataset.to];
+            : [channel.dataset.from, channel.dataset.to];
           const channelTransport = { person, channelId, fromGate, toGate };
           addFlowMotion(group, flowCurve, '#ffc247', hover, false, 1, 0, 3, {
             ...channelTransport, exitGate: toGate
@@ -1318,6 +1361,15 @@ function makePlaneGroup(paths, person, sharedChannels, relationshipChannels, opt
       }
     }
   }
+  // The embedded SVG is the visual source of truth. Keep the traced Three.js
+  // geometry as invisible raycast targets for existing chart interactions.
+  group.traverse(object => {
+    if (!object.userData.svgPart || !object.material) return;
+    for (const material of Array.isArray(object.material) ? object.material : [object.material]) {
+      material.colorWrite = false;
+      material.depthWrite = false;
+    }
+  });
   // SVG coordinates use a downward-positive Y axis. Flip the finished plane so the chart reads upright in 3D.
   group.scale.y = -1;
   group.position.set(-180, chartViewHeight, 0);
@@ -1332,7 +1384,7 @@ function makePlaneGroup(paths, person, sharedChannels, relationshipChannels, opt
 function parseGateList(selector) {
   return new Set((document.querySelector(selector).value.match(/\d+/g) || []).map(Number).filter(n => n >= 1 && n <= 64));
 }
-function extractLayer(doc, person, gates) {
+function extractLayer(doc, person, gates, activations = []) {
   const svg = doc.documentElement.cloneNode(true);
   const keep = svg.querySelector(person === 'daniel' ? '.person--daniel' : '.person--camille') || svg.querySelector('#bodygraph-art');
   // The current bodygraph template has one chart with its own centered art transform.
@@ -1343,7 +1395,19 @@ function extractLayer(doc, person, gates) {
     if (child === keep || ['defs', 'style'].includes(child.localName)) continue;
     child.remove();
   }
-  keep.querySelectorAll('.gate').forEach(g => g.setAttribute('data-state', gates.has(+g.dataset.gate) ? 'closed' : 'open'));
+  const activationTypes = new Map();
+  for (const activation of activations) {
+    const type = String(activation.type || '').toLowerCase();
+    if (!activationTypes.has(activation.gate)) activationTypes.set(activation.gate, new Set());
+    if (type) activationTypes.get(activation.gate).add(type);
+  }
+  keep.querySelectorAll('.gate').forEach(g => {
+    const gate = +g.dataset.gate;
+    g.setAttribute('data-state', gates.has(gate) ? 'closed' : 'open');
+    const types = [...(activationTypes.get(gate) || [])];
+    if (types.length) g.setAttribute('data-activation', types.join(' '));
+    else g.removeAttribute('data-activation');
+  });
   const centerChannelCounts = new Map();
   const gateCenters = new Map([...keep.querySelectorAll('.gate[data-gate][data-center]')].map(gate => [+gate.dataset.gate, gate.dataset.center]));
   keep.querySelectorAll('.channel-group[data-from][data-to]').forEach(ch => {
@@ -1685,7 +1749,8 @@ function rebuildRelationship() {
   }
   const chartData = {};
   for (const person of ['daniel', 'camille']) {
-    const data = loader.parse(extractLayer(sourceDocument, person, natalGates[person]));
+    const natalActivations = window.hdNatalPlanetaryActivations?.[person] || [];
+    const data = loader.parse(extractLayer(sourceDocument, person, natalGates[person], natalActivations));
     chartData[person] = data;
     releaseGroup(planeGroups[person]);
     const group = makePlaneGroup(data.paths, person, sharedChannels, relationshipChannels, {
@@ -1714,7 +1779,7 @@ function rebuildRelationship() {
     for (const person of ['daniel', 'camille']) {
       const natalGates = parseGateList(person === 'daniel' ? '#danielGates' : '#camilleGates');
       const activations = new Set([...natalGates, ...activeTransitSnapshot.gates]);
-      const transitData = loader.parse(extractLayer(sourceDocument, person, activations));
+      const transitData = loader.parse(extractLayer(sourceDocument, person, activations, window.hdNatalPlanetaryActivations?.[person] || []));
       const group = makeTransitGroup(transitData, activeTransitSnapshot, natalGates, person);
       group.scale.set(familyLayout.parentScale, -familyLayout.parentScale, familyLayout.parentScale);
       group.position.set(-180 * familyLayout.parentScale, chartViewHeight * familyLayout.parentScale, 0);
@@ -1742,7 +1807,7 @@ function rebuildRelationship() {
     childPosition.position.set(offsetX, offsetY, offsetZ);
     childPosition.rotation.y = Math.atan2(-offsetX, -offsetZ);
     const childGates = natalGates[child.id];
-    const childData = loader.parse(extractLayer(sourceDocument, 'daniel', childGates));
+    const childData = loader.parse(extractLayer(sourceDocument, 'daniel', childGates, child.activations || []));
     chartData[child.id] = childData;
     const color = childPalette[index % childPalette.length];
     const childGroup = makePlaneGroup(childData.paths, child.id, new Set(), relationshipChannels, {
@@ -1754,7 +1819,7 @@ function rebuildRelationship() {
     chartRoot.add(childPosition);
     if (activeTransitSnapshot) {
       const activations = new Set([...childGates, ...activeTransitSnapshot.gates]);
-      const transitData = loader.parse(extractLayer(sourceDocument, 'daniel', activations));
+      const transitData = loader.parse(extractLayer(sourceDocument, 'daniel', activations, child.activations || []));
       const transitGroup = makeTransitGroup(transitData, activeTransitSnapshot, childGates, child.id);
       transitGroup.scale.set(flipX ? -childScale : childScale, -childScale, childScale);
       transitGroup.position.set(flipX ? 180 * childScale : -180 * childScale, chartViewHeight * childScale, 0);
