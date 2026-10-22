@@ -1054,8 +1054,16 @@ function dashedTubesFromCurve(curve, radius, material, dashLength = 7, gapLength
   }
   return meshes;
 }
-function gradientTubeMaterial() {
-  return new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide, depthWrite: false, toneMapped: false });
+function gradientTubeMaterial(opacity = 1, additive = false) {
+  return new THREE.MeshBasicMaterial({
+    vertexColors: true,
+    side: THREE.DoubleSide,
+    transparent: opacity < 1,
+    opacity,
+    blending: additive ? THREE.AdditiveBlending : THREE.NormalBlending,
+    depthWrite: false,
+    toneMapped: false
+  });
 }
 function applyTubeGradient(geometry, fromColor, toColor, fromT = 0, toT = 1) {
   const positions = geometry.getAttribute('position');
@@ -1075,16 +1083,28 @@ function applyTubeGradient(geometry, fromColor, toColor, fromT = 0, toT = 1) {
   geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
 }
 function gradientTubesFromCurve(curve, radius, fromColor, toColor, dashed = false) {
-  const material = gradientTubeMaterial();
-  if (!dashed) {
-    const geometry = new THREE.TubeGeometry(curve, 96, radius, 6, false);
-    applyTubeGradient(geometry, fromColor, toColor);
-    const mesh = new THREE.Mesh(geometry, material);
-    mesh.userData.svgPart = true;
-    return [mesh];
-  }
+  const wallMaterial = gradientTubeMaterial(0.24, true);
+  const coreMaterial = gradientTubeMaterial();
+  const makePair = (path, segments, fromT, toT) => {
+    const wallGeometry = new THREE.TubeGeometry(path, segments, radius * 2.8, 8, false);
+    applyTubeGradient(wallGeometry, fromColor, toColor, fromT, toT);
+    const wall = new THREE.Mesh(wallGeometry, wallMaterial);
+    wall.renderOrder = 2;
+    wall.userData.svgPart = true;
+    const coreGeometry = new THREE.TubeGeometry(path, segments, radius, 6, false);
+    applyTubeGradient(coreGeometry, fromColor, toColor, fromT, toT);
+    const core = new THREE.Mesh(coreGeometry, coreMaterial);
+    core.renderOrder = 3;
+    core.userData.svgPart = true;
+    return [wall, core];
+  };
+  if (!dashed) return makePair(curve, 96, 0, 1);
   const total = curve.getLength();
-  if (!Number.isFinite(total) || total <= 0) { material.dispose(); return []; }
+  if (!Number.isFinite(total) || total <= 0) {
+    wallMaterial.dispose();
+    coreMaterial.dispose();
+    return [];
+  }
   const meshes = [];
   const dashLength = 7, gapLength = 4;
   for (let start = 0; start < total; start += dashLength + gapLength) {
@@ -1096,11 +1116,7 @@ function gradientTubesFromCurve(curve, radius, fromColor, toColor, dashed = fals
       points.push(curve.getPointAt(distance / total));
     }
     const segment = new THREE.CatmullRomCurve3(points, false, 'centripetal');
-    const geometry = new THREE.TubeGeometry(segment, Math.max(4, divisions * 2), radius, 6, false);
-    applyTubeGradient(geometry, fromColor, toColor, start / total, end / total);
-    const mesh = new THREE.Mesh(geometry, material);
-    mesh.userData.svgPart = true;
-    meshes.push(mesh);
+    meshes.push(...makePair(segment, Math.max(4, divisions * 2), start / total, end / total));
   }
   return meshes;
 }
@@ -1870,10 +1886,14 @@ function makeRelationshipGroup(chartData, natalGates, transitSnapshot, pairs = [
   const personNames = Object.fromEntries(people.map(person => [person, window.hdChartNames?.[person] || (person === 'daniel' ? 'Person 1' : person === 'camille' ? 'Person 2' : 'Child')]));
   const gateMarkerMaterial = (person, gate) => natalGates[person]?.has(gate) ? materialFor(person) : transitPurple;
   const chakraColorForGate = (person, gate) => {
-    const svgRoot = chartData[person]?.paths.find(path => path.userData?.node)?.userData.node.ownerSVGElement;
+    const svgRoot = chartData[person]?.paths.find(path => path.userData?.node)?.userData.node.closest('svg');
     const gateNode = svgRoot?.querySelector(`.gate[data-gate="${gate}"]`);
-    const centerNode = gateNode && svgRoot.querySelector(`.center[data-center="${gateNode.dataset.center}"] .center-shape`);
-    const color = centerNode?.getAttribute('data-base-fill') || centerNode?.style?.getPropertyValue('--chakra-color') || chartColor(person);
+    const center = gateNode?.closest('.center') || (gateNode && svgRoot?.querySelector(`.center[data-center="${gateNode.dataset.center}"]`));
+    const centerNode = center?.querySelector('.center-shape');
+    const color = centerNode?.getAttribute('data-base-fill')
+      || centerNode?.style?.getPropertyValue('--chakra-color')
+      || (centerNode && getComputedStyle(centerNode).getPropertyValue('--chakra-color').trim())
+      || chartColor(person);
     return new THREE.Color(color);
   };
   const gateSourceDescription = (person, gate) => {
