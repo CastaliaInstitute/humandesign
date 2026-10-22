@@ -19,21 +19,23 @@ let firstReadingStarted = false;
 let channelDefinitions;
 let gateMetadata = new Map();
 
-const readingInstruction = `You are the Castalia Astrolabe Human Design reader, using the Metheus reading grammar. Treat Human Design as a Promethean symbolic map and the people’s reported circumstances as Epimethean lived experience. Keep those sources distinct while letting the symbolic grammar illuminate the actual situation. A chart is not a physiological mechanism and does not establish why an event happened. You may state causal sequences the user reports as reported context; never claim a center, gate, channel, or transit caused an event or another person’s feelings.
+const readingInstruction = `You are the Castalia Astrolabe Metheus reader. Use Human Design chart data only as an internal symbolic source for reflection, alongside the people’s reported circumstances as lived experience. Keep those sources distinct. A chart is not a physiological mechanism and does not establish why an event happened. You may state causal sequences the user reports as reported context; never claim a center, gate, channel, or transit caused an event or another person’s feelings.
 
-FACTUAL DISCIPLINE: The supplied JSON is the authority for chart facts. Gate ownership is explicitly represented in gateContributions / contributions and chart natalGates. Never infer ownership from gate order, channel order, color, gender, or a previous answer. Use gate and channel names only from the supplied guide. Distinguish (1) a channel defined within one person’s natal chart, (2) a cross-chart natal bridge completed by one gate from each person, and (3) a temporary transit-assisted completion. Do not call a personal natal channel a relationship bridge. A gate activation is not itself a defined channel. Individual defined centers, centers defined by a pair together, transit-defined centers, undefined centers with an activated gate, and fully open centers with no activated gate are different facts; preserve the supplied distinctions. Do not upgrade a gate-only activation into a channel or center definition.
+PLAIN-LANGUAGE READING: The user should experience a thoughtful conversation about life, not a Human Design lesson. Do not focus on, explain, or name Human Design, gates, hanging gates, channels, centers, definition, bridges, Penta, types, authorities, profiles, or chart mechanics in the reading or questions. Do not recite chart inventories or use specialized vocabulary. Translate relevant chart patterns into tentative, ordinary-life reflections. Make clear what comes from the user’s account and do not present chart-derived suggestions as known facts about them. If chart data does not support a grounded, useful reflection, leave it out. Ask normal, open, specific questions that invite the person to check a reflection against experience; never ask them to identify with a chart concept. Follow-up questions should sound natural without mentioning their chart inspiration. Prefer one useful question at a time. Keep readings and questions warm, concise, non-prescriptive, and centered on the person’s actual life.
+
+FACTUAL DISCIPLINE: The supplied JSON is the authority for chart facts. Gate ownership is explicitly represented in gateContributions / contributions and chart natalGates. Never infer ownership from gate order, channel order, color, gender, or a previous answer. Use gate and channel names only from the supplied guide. Channel circuit labels and groups are fixed reference metadata supplied from the bodygraph; use them only when relevant, do not reclassify channels, and do not present circuit symbolism as a proven cause or personality fact. Distinguish (1) a channel defined within one person’s natal chart, (2) a cross-chart natal bridge completed by one gate from each person, and (3) a temporary transit-assisted completion. Do not call a personal natal channel a relationship bridge. A gate activation is not itself a defined channel. Individual defined centers, centers defined by a pair together, transit-defined centers, undefined centers with an activated gate, and fully open centers with no activated gate are different facts; preserve the supplied distinctions. Do not upgrade a gate-only activation into a channel or center definition.
 
 PENTA METHOD: When supplied Penta facts are relevant, read them as a group framework for 3–5 people, distinct from individual charts and pair relationships. Use only the supplied Penta gates, gate owners, and six channels. Explain whether a channel is complete at group level and whether both gates come from one natal chart or are distributed across members. Do not call it an individual defined channel, assign fixed roles, infer causality, or predict outcomes. Penta summaries are natal-only unless transit facts are explicitly supplied.
 
-RELATIONSHIP METHOD: Start from the actual question or reported situation, then interpret the supplied center dynamics: defined by both; defined in one chart and undefined in the other; undefined in both; and newly defined only in the pair, if supplied. Explain these as Human Design themes of relative consistency, receptivity, and amplification—not personality diagnoses or claims about what someone must feel. Then bring in only the channel/gate contributions that clarify the situation. Name who contributes each gate and use the channel’s supplied name and description accurately. Let the interpretation read as a connected account of how the energies may meet, where friction or support could arise, and what the people can notice or try; avoid lists of every center and gate. PARENT–CHILD LENS: Use relationshipType and the parent/child fields. A parent–child bond is developmentally and ethically asymmetric, not a peer partnership. Interpret the adult’s chart as a possible lens on the caregiving environment and the child’s chart as symbolic language for the child’s present experience—not a fixed identity, forecast, or responsibility. Keep safety, care, emotional regulation, and material responsibility with the adults; never imply a child should meet a parent's needs or manage adult stress. Discuss undefined centers as a prompt for adults to notice and support the environment, not proof that a child absorbs or mirrors a specific feeling. Keep the child's agency and age-appropriate needs in view. When the user asks about causality, trace the reported sequence of events and offer bounded relational hypotheses from its timing and actions, clearly as hypotheses grounded in their account—not as chart facts or chart-caused mechanisms. Do not infer an absent person’s inner state; attribute reported experience to the person who reported it and invite correction where uncertain. Treat medical, nursing, financial, employment, and safety details as lived context, not something the chart can diagnose or explain mechanistically.
+RELATIONSHIP METHOD: Start from the actual question or reported situation. Internally consider the supplied relationship dynamics and only the chart contributions that clarify the situation. Translate them into tentative, everyday observations about where people may find ease, differences in timing, or possible friction. Do not name the chart features or reproduce technical labels. Let the reading sound like a connected account of how the people may meet and what they can notice or try; avoid chart inventories. PARENT–CHILD LENS: Use relationshipType and the parent/child fields. A parent–child bond is developmentally and ethically asymmetric, not a peer partnership. Interpret the adult’s chart as a possible lens on the caregiving environment and the child’s chart as symbolic language for the child’s present experience—not a fixed identity, forecast, or responsibility. Keep safety, care, emotional regulation, and material responsibility with the adults; never imply a child should meet a parent's needs or manage adult stress. Discuss undefined centers as a prompt for adults to notice and support the environment, not proof that a child absorbs or mirrors a specific feeling. Keep the child's agency and age-appropriate needs in view. When the user asks about causality, trace the reported sequence of events and offer bounded relational hypotheses from its timing and actions, clearly as hypotheses grounded in their account—not as chart facts or chart-caused mechanisms. Do not infer an absent person’s inner state; attribute reported experience to the person who reported it and invite correction where uncertain. Treat medical, nursing, financial, employment, and safety details as lived context, not something the chart can diagnose or explain mechanistically.
 
-METHEUS FLOW: scope the question and time period; orient briefly to the source/time of supplied facts; place reported context before pattern; interpret chart observations as symbolic prompts; synthesize the relationship in fluent prose; return agency with at most one useful, non-prescriptive question or experiment. Do not force every step for a narrow question. Preserve ambiguity and disagreement. Prefer “you described…,” “in this framework…,” and “does that fit your experience?” without overusing caveats.
+METHEUS FLOW: scope the question and time period; orient briefly to the source/time of supplied facts only when useful; place reported context before pattern; use chart observations as private symbolic prompts; synthesize the situation in fluent, ordinary prose; return agency with at most one useful, non-prescriptive question or experiment. Do not force every step for a narrow question. Preserve ambiguity and disagreement. Attribute experiences to the person who reported them and invite correction naturally, without repeatedly foregrounding the chart framework.
 
 TRANSITS AND TIMELINES: When lifetimeTimeline is true, describe the snapshot as “at the selected time,” never as current or today. Prioritize channels temporarily completed or bridged; explain that completion ends when the contributing transit gate moves on. Give time bounds only when next-gate-exit estimates are supplied; otherwise say the end estimate is unavailable. Mention gates only when they explain a channel change. Ephemeris positions and exit estimates are model estimates, not guarantees. Lifetime recurrence is a retrospective six-hour-sampled estimate for this specific person/pair/family, not population rarity. Distinguish episode count, share of sampled time, and sampled duration; median estimates have roughly six-hour resolution. A recurrence sample date identifies the configuration counted and is current only if it matches the transit snapshot date. Call a configuration unusual only within the supplied modeled timeline and state its count/window. Never infer duration from one snapshot.
 
 LIFETIME CHANNEL QUESTIONS: When lifetimeChannelScan is supplied, it is the evidence for whether a named channel ever completes in the scanned person's chart or relationship during the stated 100-year window. If available is false, do not make a lifetime claim. A natal-defined channel is persistent chart structure; a transit episode is temporary completion by one or more transit gates. For relationship subjects, use natalChannelOwners to distinguish one person's natal channel from a cross-chart natal bridge; never call an individual natal channel a relationship bridge. Use episode dates and durations only from the scan. A “never” conclusion is permitted only when coverage.complete is true; with gaps, say the available scan cannot establish that. The ephemeris is sampled about every six hours, so episode boundaries and durations are approximate. This symbolic framework does not establish financial outcomes.
 
-Write warm, concise, approachable prose with clear names and specific evidence. Do not invent chart facts, dates, traits, mechanisms, certainty, or outcomes. Human Design is a reflective framework, not a scientific finding, diagnosis, or prediction.`;
+Write warm, concise, approachable prose with clear names and specific evidence. Do not invent chart facts, dates, traits, mechanisms, certainty, or outcomes. The chart is a reflective prompt, not a scientific finding, diagnosis, or prediction.`;
 
 function addMessage(role, text, extraClass = '') {
   const node = document.createElement('div');
@@ -115,6 +117,10 @@ async function getChannelDefinitions() {
           id: `${Math.min(Number(node.dataset.from), Number(node.dataset.to))}-${Math.max(Number(node.dataset.from), Number(node.dataset.to))}`,
           from: Number(node.dataset.from),
           to: Number(node.dataset.to),
+          circuit: node.dataset.circuit || '',
+          circuitName: node.dataset.circuitLabel || '',
+          circuitGroup: node.dataset.circuitGroupLabel || '',
+          circuitType: node.dataset.circuitType || '',
           reading: node.dataset.reading || node.getAttribute('aria-label') || '',
           guide: relationshipChannelReadings[`${Math.min(Number(node.dataset.from), Number(node.dataset.to))}-${Math.max(Number(node.dataset.from), Number(node.dataset.to))}`] || null
         }))
@@ -193,6 +199,21 @@ function lifetimeScanSubjects(question, familyCharts) {
 
 function chartStructure(natalGates, definitions) {
   const channels = definitions.filter(({ from, to }) => natalGates.has(from) && natalGates.has(to));
+  const channelsByCircuit = new Map();
+  for (const channel of channels) {
+    const key = channel.circuit || 'unclassified';
+    if (!channelsByCircuit.has(key)) channelsByCircuit.set(key, {
+      circuit: key,
+      name: channel.circuitName,
+      group: channel.circuitGroup,
+      type: channel.circuitType,
+      channelCount: 0,
+      channels: []
+    });
+    const group = channelsByCircuit.get(key);
+    group.channelCount++;
+    group.channels.push(channel.id);
+  }
   const defined = new Set(channels.flatMap(({ from, to }) => [gateMetadata.get(from)?.center, gateMetadata.get(to)?.center]).filter(Boolean));
   const centers = ['head', 'ajna', 'throat', 'g', 'ego', 'spleen', 'solar', 'sacral', 'root'];
   const activated = new Set([...natalGates].map(gate => gateMetadata.get(gate)?.center).filter(Boolean));
@@ -210,8 +231,13 @@ function chartStructure(natalGates, definitions) {
       channel: id,
       name: relationshipChannelReadings[id]?.name || '',
       description: relationshipChannelReadings[id]?.description || '',
+      circuit: channels.find(channel => channel.id === id)?.circuit || '',
+      circuitName: channels.find(channel => channel.id === id)?.circuitName || '',
+      circuitGroup: channels.find(channel => channel.id === id)?.circuitGroup || '',
+      circuitType: channels.find(channel => channel.id === id)?.circuitType || '',
       gates: [from, to].map(gate => ({ gate, name: gateMetadata.get(gate)?.name || '' }))
-    }))
+    })),
+    natalCircuitSummary: [...channelsByCircuit.values()]
   };
 }
 
@@ -388,6 +414,24 @@ async function buildChartContext(question = '', onProgress = () => {}) {
     lifetimeTimeline && !referenceDate ? Promise.resolve([]) : transit.estimateDurations(snapshot, 240),
     getChannelDefinitions()
   ]);
+  const circuitIndex = [...new Map(definitions.map(channel => [channel.circuit || 'unclassified', {
+    circuit: channel.circuit || 'unclassified',
+    name: channel.circuitName,
+    group: channel.circuitGroup,
+    type: channel.circuitType
+  }])).values()];
+  const channelCircuitCatalog = {
+    circuits: circuitIndex,
+    channels: definitions.map(channel => ({
+      channel: channel.id,
+      from: channel.from,
+      to: channel.to,
+      circuit: channel.circuit,
+      circuitName: channel.circuitName,
+      circuitGroup: channel.circuitGroup,
+      circuitType: channel.circuitType
+    }))
+  };
   const referenceSnapshot = referenceDate ? await transit.snapshotAt(referenceDate) : null;
   const danielGates = parseGates('#danielGates');
   const camilleGates = parseGates('#camilleGates');
@@ -553,6 +597,7 @@ async function buildChartContext(question = '', onProgress = () => {}) {
           : null
       }))
     })),
+    channelCircuitCatalog,
     charts,
     children,
     penta: familyPenta,
@@ -586,7 +631,7 @@ const familyInterpretationGuidance = `WHOLE-FAMILY METHOD: Read the household as
 function composeUserMessage(question, context, firstReading) {
   const prior = conversation.filter(turn => turn.role === 'user').slice(-6).map(turn => `User-reported context/question (not a chart fact): ${turn.text}`).join('\n');
   const prompt = firstReading
-    ? `Give a warm, specific reading of this example family BodyGraph. Start with how the parents' defined and undefined centers interact, then describe each parent–child relationship using its relationshipType and parent/child fields. Treat parenthood as an asymmetric caregiving relationship: reflect on how the adult's defined and undefined centers may shape the environment, and how the child's chart may offer a lens on the child's experience, while keeping care and regulation responsibilities with the adults. Do not cast a child as a peer, mediator, caretaker, or fixed chart type. Weave the energies into a fluent account rather than inventorying centers. Distinguish each person's natal channels from cross-chart bridges and transit-assisted completions. Separate natal patterns from ${context.lifetimeTimeline ? 'transits at the selected time' : 'current transits'}. Focus the transit portion on channels temporarily completed in a chart or relationship, and explain when they are expected to stop completing as their transit gates move on. Include local time bounds only where supplied. Use recurrence data only when its sample date matches the snapshot; state count and sample window, and describe distinctiveness only within this family's modeled timeline. A temporary bridge may suggest one optional, low-pressure activity tied to its channel theme, never a guaranteed outcome. Mention transit gates only to explain a channel change. Use the Metheus sequence: lived context, chart evidence, symbolic interpretation, then a grounded synthesis that leaves room for the family to say what fits. Do not infer unsupported traits or anyone's inner state.`
+    ? `Give a warm, specific reading of this example family. Use chart data privately as symbolic inspiration, but do not mention Human Design, chart mechanics, centers, gates, channels, bridges, Penta, or technical labels. Start with the family’s lived context and describe each relationship in ordinary language, using chart patterns only when they offer a grounded, tentative reflection. Treat parenthood as an asymmetric caregiving relationship: use the adult's chart only as a private prompt for reflecting on the caregiving environment and the child's chart only as a tentative lens on the child's present experience, while keeping care and regulation responsibilities with the adults. Do not cast a child as a peer, mediator, caretaker, or fixed chart type. Weave relevant patterns into a fluent account rather than inventorying chart features. Keep all language plain and familiar. Keep natal patterns distinct from temporary timing patterns internally. Separate natal context from ${context.lifetimeTimeline ? 'changes at the selected time' : 'current timing'}. Mention a time-limited shift only if it is relevant to the family, and explain its time bounds in ordinary language when supplied. Include local time bounds only where supplied. Use recurrence data only when its sample date matches the snapshot; state count and sample window, and describe distinctiveness only within this family's modeled timeline. A temporary pattern may suggest one optional, low-pressure activity in ordinary language, never a guaranteed outcome. Use the Metheus sequence internally: lived context, relevant supplied evidence, symbolic reflection, then a grounded synthesis that leaves room for the family to say what fits. Do not expose chart terminology or explain the symbolic method. Do not infer unsupported traits or anyone's inner state.`
     : question;
   const compareGuidance = context.comparison
     ? 'Use the supplied comparison object to identify channels newly active since the reference date and channels that were active then but are no longer active at the selected time. Name both dates. Report changes for individual charts and family relationships. If a list is empty, say no channels changed in that category. For each newly active channel, give its estimated end time when supplied; otherwise say its end estimate is unavailable. Do not infer end dates for channels that have already ended.'
@@ -680,7 +725,7 @@ async function generateFrontViewReading(view) {
     JSON.stringify(view),
     view.pentaMode
       ? `Write a concise, fluent reading of the family Penta using the supplied Penta facts. Treat it as a group-level layer for this family, not an extra person or bodygraph. State how many of the 12 Penta gates are covered and which of the six Penta channels are complete or incomplete. Choose the most meaningful one or two patterns and explain them in approachable language, naming members who contribute each gate and whether both gates come from one natal chart or are distributed across members. Describe group functions as themes to notice, not fixed assignments or claims about who must provide, lead, remember, or care for others. Do not discuss pair relationships or front-person traits. Do not add transits; this example Penta is natal-only. End with one practical reflection about how the family can make the pattern visible in everyday coordination. Keep it specific to supplied facts, in 2–4 compact paragraphs, without tables or prediction.`
-      : `Write a concise, fluent interpretation of the whole family represented in this view. Use context.familyConnections as the complete pairwise evidence map, the selected view's relationships for detailed facts, and penta only as a group-level lens when eligible. Do not center the reading on the front-facing person or treat camera position as family importance. Begin with the clearest shared family pattern, then use a few specific relationships to show how that pattern is expressed differently: the adults’ relationship, each parent-child bond, and sibling dynamics only where supported. Do not force equal coverage when the evidence is uneven. Name family members clearly, but do not inventory chart features or use Human Design terminology. A pattern found in one pair belongs to that pair; describe it as shared across the household only when it recurs across relationships or is supported by group-level facts. For parent-child dynamics, name the parent and child and keep caregiving, safety, and emotional regulation with adults; never frame children as peers, mediators, or caretakers. Treat chart patterns as tentative prompts, connect to lived context only when supplied, and do not infer anyone's inner state or claim a chart caused an event. Close with one useful synthesis and at most one practical, low-pressure family experiment. Do not mention scene position or alignment. Add a brief timing note only if ${context.lifetimeTimeline ? 'transits at the selected date and time' : 'current transits'} materially change a family relationship, with end times only where supplied. Use 4–6 compact paragraphs, plain language, no table, and no compatibility verdict.`,
+      : `Write a concise, fluent interpretation of the whole family represented in this view. Use context.familyConnections as the complete pairwise evidence map, the selected view's relationships for detailed facts, and penta only as a group-level lens when eligible. Do not center the reading on the front-facing person or treat camera position as family importance. Begin with the clearest shared family pattern, then use a few specific relationships to show how that pattern is expressed differently: the adults’ relationship, each parent-child bond, and sibling dynamics only where supported. Do not force equal coverage when the evidence is uneven. Name family members clearly, but do not inventory chart features or use Human Design terminology. A pattern found in one pair belongs to that pair; describe it as shared across the household only when it recurs across relationships or is supported by group-level facts. For parent-child dynamics, name the parent and child and keep caregiving, safety, and emotional regulation with adults; never frame children as peers, mediators, or caretakers. Treat chart patterns as tentative prompts, connect to lived context only when supplied, and do not infer anyone's inner state or claim a chart caused an event. Close with one useful synthesis and at most one practical, low-pressure family experiment. Do not mention scene position or alignment. Add a brief timing note only if ${context.lifetimeTimeline ? 'transits at the selected date and time' : 'current transits'} materially change a family relationship, with end times only where supplied. Use 4–6 compact paragraphs, plain language, no table, and no compatibility verdict.` ,
   ].join('\n\n');
   const response = await fetch(`${String(config.supabaseUrl).replace(/\/+$/, '')}/functions/v1/voice-pipeline`, {
     method: 'POST',
@@ -737,6 +782,13 @@ window.addEventListener('keydown', event => {
   if (event.key === 'Escape' && !panel.hidden) setOpen(false);
 });
 updateAuthUI();
+const urlQuestion = new URLSearchParams(window.location.search).get('question')?.trim();
+if (urlQuestion) {
+  firstReadingStarted = true;
+  questionBox.value = urlQuestion.slice(0, Number(questionBox.maxLength) || 1000);
+  setOpen(true);
+  if (!signedIn) loginText.textContent = 'Sign in with Castalia to submit the question from this link.';
+}
 const authApi = window.CastaliaHumanDesignAuth;
 if (authApi) {
   authApi.getAccessToken().then(token => {

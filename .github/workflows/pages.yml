@@ -39,7 +39,7 @@ jobs:
               "supabaseUrl": os.environ["SUPABASE_URL"],
               "supabaseAnonKey": os.environ["SUPABASE_ANON_KEY"],
           }
-          Path("config.js").write_text("window.castaliaConfig = " + json.dumps(config) + ";\\n")
+          Path("config.js").write_text("window.castaliaConfig = " + json.dumps(config) + ";\n")
           PY
       - uses: actions/upload-pages-artifact@v3
         with:
