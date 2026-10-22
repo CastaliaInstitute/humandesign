@@ -77,8 +77,11 @@ const planeGroups = {};
 let relationshipGroup = null;
 let activeRelationshipPairKey = '';
 let lastRelationshipFacingAngle = null;
+let lastRelationshipTopViewAmount = -1;
 let orbitDragging = false;
 let lastRelationshipRefreshAt = 0;
+let lastCameraFitAt = 0;
+let lastFittedTopViewAmount = -1;
 let currentChartData = null;
 let currentNatalGates = null;
 let currentTransitSnapshot = null;
@@ -268,26 +271,45 @@ function cameraAzimuth() {
   const offset = camera.position.clone().sub(controls.target);
   return Math.atan2(offset.x, offset.z);
 }
-function orientPlaneToCamera(group, scale, flipX, parentYaw = 0, centerZ = 0) {
+function topViewAmount() {
+  const elevation = camera.position.clone().sub(controls.target).normalize().y;
+  const amount = THREE.MathUtils.clamp((elevation - 0.28) / (0.92 - 0.28), 0, 1);
+  return amount * amount * (3 - 2 * amount);
+}
+function topDownViewActive() {
+  return camera.position.clone().sub(controls.target).normalize().y > 0.76;
+}
+function orientPlaneToCamera(group, scale, flipX, parentYaw = 0, centerZ = 0, parentFrame = chartRoot, inward = new THREE.Vector3(0, 0, -1)) {
   if (!group) return;
   const facingYaw = cameraAzimuth() - familyAzimuth - parentYaw;
-  const centerLocalX = (flipX ? -1 : 1) * 180 * scale;
-  group.rotation.y = facingYaw;
-  group.position.x = -centerLocalX * Math.cos(facingYaw);
-  group.position.z = centerZ + centerLocalX * Math.sin(facingYaw);
+  const upright = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), facingYaw);
+  const frameRotation = parentFrame.getWorldQuaternion(new THREE.Quaternion()).invert();
+  const normal = camera.position.clone().sub(controls.target).normalize().applyQuaternion(frameRotation).normalize();
+  let up = inward.clone().addScaledVector(normal, -inward.dot(normal));
+  if (up.lengthSq() < 1e-6) up.set(0, 1, 0).addScaledVector(normal, -normal.y);
+  up.normalize();
+  const right = up.clone().cross(normal).normalize();
+  up = normal.clone().cross(right).normalize();
+  const faceInward = new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(right, up, normal));
+  group.quaternion.copy(upright).slerp(faceInward, topViewAmount());
+
+  // Keep the chart center fixed while its plane pitches and turns.
+  const localChartCenter = new THREE.Vector3(180 * group.scale.x, 180 * group.scale.y, 0).applyQuaternion(group.quaternion);
+  group.position.set(0, familyViewCenterY, centerZ).sub(localChartCenter);
 }
 function syncChartFacing() {
   for (const person of ['daniel', 'camille']) {
     const centerZ = person === frontPerson ? familyLayout.parentRadius : -familyLayout.parentRadius;
-    orientPlaneToCamera(planeGroups[person], familyLayout.parentScale, false, 0, centerZ);
-    orientPlaneToCamera(transitGroups[person], familyLayout.parentScale, false, 0, centerZ);
+    const inward = new THREE.Vector3(0, 0, centerZ >= 0 ? -1 : 1);
+    orientPlaneToCamera(planeGroups[person], familyLayout.parentScale, false, 0, centerZ, chartRoot, inward);
+    orientPlaneToCamera(transitGroups[person], familyLayout.parentScale, false, 0, centerZ, chartRoot, inward);
   }
   familyChildren.forEach((child, index) => {
     const parent = familyGroups[child.id];
     if (!parent) return;
     const chart = parent.children.find(item => item.name.includes('SVG plane'));
-    orientPlaneToCamera(chart, familyLayout.childScale, false, parent.rotation.y);
-    orientPlaneToCamera(transitGroups[child.id], familyLayout.childScale, false, parent.rotation.y);
+    orientPlaneToCamera(chart, familyLayout.childScale, false, parent.rotation.y, 0, parent, new THREE.Vector3(0, 0, 1));
+    orientPlaneToCamera(transitGroups[child.id], familyLayout.childScale, false, parent.rotation.y, 0, parent, new THREE.Vector3(0, 0, 1));
   });
 }
 function worldPointInFamily(point) {
@@ -960,6 +982,56 @@ function dashedTubesFromCurve(curve, radius, material, dashLength = 7, gapLength
   }
   return meshes;
 }
+function gradientTubeMaterial() {
+  return new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide, depthWrite: false, toneMapped: false });
+}
+function applyTubeGradient(geometry, fromColor, toColor, fromT = 0, toT = 1) {
+  const positions = geometry.getAttribute('position');
+  const tubularSegments = geometry.parameters.tubularSegments;
+  const radialSegments = geometry.parameters.radialSegments;
+  const colors = new Float32Array(positions.count * 3);
+  const color = new THREE.Color();
+  for (let index = 0; index < positions.count; index++) {
+    const segment = Math.floor(index / (radialSegments + 1));
+    const localT = fromT + (toT - fromT) * Math.min(1, segment / tubularSegments);
+    color.copy(fromColor).lerp(toColor, localT);
+    const offset = index * 3;
+    colors[offset] = color.r;
+    colors[offset + 1] = color.g;
+    colors[offset + 2] = color.b;
+  }
+  geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+}
+function gradientTubesFromCurve(curve, radius, fromColor, toColor, dashed = false) {
+  const material = gradientTubeMaterial();
+  if (!dashed) {
+    const geometry = new THREE.TubeGeometry(curve, 96, radius, 6, false);
+    applyTubeGradient(geometry, fromColor, toColor);
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.userData.svgPart = true;
+    return [mesh];
+  }
+  const total = curve.getLength();
+  if (!Number.isFinite(total) || total <= 0) { material.dispose(); return []; }
+  const meshes = [];
+  const dashLength = 7, gapLength = 4;
+  for (let start = 0; start < total; start += dashLength + gapLength) {
+    const end = Math.min(start + dashLength, total);
+    const divisions = Math.max(2, Math.ceil((end - start) / 1.5));
+    const points = [];
+    for (let index = 0; index <= divisions; index++) {
+      const distance = start + (end - start) * index / divisions;
+      points.push(curve.getPointAt(distance / total));
+    }
+    const segment = new THREE.CatmullRomCurve3(points, false, 'centripetal');
+    const geometry = new THREE.TubeGeometry(segment, Math.max(4, divisions * 2), radius, 6, false);
+    applyTubeGradient(geometry, fromColor, toColor, start / total, end / total);
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.userData.svgPart = true;
+    meshes.push(mesh);
+  }
+  return meshes;
+}
 function addFlowMotion(target, curve, color, hover = null, reverse = false, size = 1, phaseOffset = 0, particleCount = 1, transport = null) {
   if (!curve) return;
   const length = curve.getLength();
@@ -1588,30 +1660,18 @@ function getGatePoints(paths) {
   return result;
 }
 function chartPointInFamily(point, person, localDepth = 0) {
-  const childIndex = familyChildren.findIndex(child => child.id === person);
-  const isChild = childIndex >= 0;
-  const scale = isChild ? familyLayout.childScale : familyLayout.parentScale;
-  let centerX = 0, centerY = 0, centerZ = 0;
-  if (isChild) {
-    const side = childIndex % 2 === 0 ? 1 : -1;
-    const childOrdinal = Math.floor(childIndex / 2);
-    const sideCount = side > 0 ? Math.ceil(familyChildren.length / 2) : Math.floor(familyChildren.length / 2);
-    const offset = sideCount > 1 ? (childOrdinal / (sideCount - 1) - 0.5) * (Math.PI / 3) : 0;
-    const childAngle = side > 0 ? offset : Math.PI - offset;
-    centerX = childPlaneRadius() * Math.cos(childAngle);
-    centerZ = childPlaneRadius() * Math.sin(childAngle);
-  } else {
-    centerZ = person === frontPerson ? familyLayout.parentRadius : -familyLayout.parentRadius;
+  const isChild = familyChildren.some(child => child.id === person);
+  const chart = isChild
+    ? familyGroups[person]?.children.find(item => item.name.includes('SVG plane'))
+    : planeGroups[person];
+  if (!chart) {
+    const scale = isChild ? familyLayout.childScale : familyLayout.parentScale;
+    const centerZ = person === frontPerson ? familyLayout.parentRadius : -familyLayout.parentRadius;
+    return new THREE.Vector3((point.x - 180) * scale, -point.y * scale + chartViewHeight * scale, centerZ + localDepth * scale);
   }
-  const localX = point.x * scale - 180 * scale;
-  const localY = -point.y * scale + chartViewHeight * scale + centerY;
-  const localZ = localDepth * scale;
-  const facingYaw = cameraAzimuth() - familyAzimuth;
-  return new THREE.Vector3(
-    centerX + Math.cos(facingYaw) * localX + Math.sin(facingYaw) * localZ,
-    localY,
-    centerZ - Math.sin(facingYaw) * localX + Math.cos(facingYaw) * localZ
-  );
+  chartRoot.updateWorldMatrix(true, true);
+  const worldPoint = chart.localToWorld(new THREE.Vector3(point.x, point.y, localDepth));
+  return chartRoot.worldToLocal(worldPoint);
 }
 function visibleFamilyPairs() {
   if (!currentNatalGates) return [];
@@ -1670,16 +1730,18 @@ function refreshRelationshipPairing(force = false) {
   if (orbitDragging && !force) return;
   const now = performance.now();
   if (!force && now - lastRelationshipRefreshAt < 1000) return;
-  const pairs = overlappingChartPairs();
+  const pairs = topDownViewActive() ? visibleFamilyPairs() : overlappingChartPairs();
   const key = pairs.map(pair => pair.join(':')).sort().join('|');
   const facingAngle = cameraAzimuth() - familyAzimuth;
+  const topAmount = topViewAmount();
   const facingDelta = lastRelationshipFacingAngle === null ? Infinity :
     Math.abs(THREE.MathUtils.euclideanModulo(facingAngle - lastRelationshipFacingAngle + Math.PI, Math.PI * 2) - Math.PI);
   const pairChanged = key !== activeRelationshipPairKey;
-  if (!pairChanged && facingDelta < THREE.MathUtils.degToRad(2)) return;
+  if (!pairChanged && facingDelta < THREE.MathUtils.degToRad(2) && Math.abs(topAmount - lastRelationshipTopViewAmount) < 0.035) return;
   lastRelationshipRefreshAt = now;
   activeRelationshipPairKey = key;
   lastRelationshipFacingAngle = facingAngle;
+  lastRelationshipTopViewAmount = topAmount;
   // Bridge flow beads are direct children of this group. Remove their update
   // records before disposal; a detached Three.js group still owns its children.
   for (let i = flowAnimations.length - 1; i >= 0; i--) {
@@ -1720,7 +1782,6 @@ function makeRelationshipGroup(chartData, natalGates, transitSnapshot, pairs = [
   const group = new THREE.Group();
   group.name = 'Relationship-completed channels · overlapping charts';
   const gateMarkerZ = 3.3;
-  const relationshipTeal = lineMaterial(new THREE.Color('#238f8b'), 0.98);
   const personMaterials = new Map();
   const materialFor = person => {
     if (!personMaterials.has(person)) personMaterials.set(person, lineMaterial(chartColor(person), 0.9));
@@ -1729,10 +1790,18 @@ function makeRelationshipGroup(chartData, natalGates, transitSnapshot, pairs = [
   const transitPurple = lineMaterial(new THREE.Color('#7c3aed'), 0.95);
   const transitGates = new Set(transitSnapshot?.gates || []);
   const people = Object.keys(chartData);
+  const topDown = topDownViewActive();
   const overlappingKeys = new Set(overlappingChartPairs().map(pair => [...pair].sort().join(':')));
   const gatePoints = Object.fromEntries(people.map(person => [person, getGatePoints(chartData[person].paths)]));
   const personNames = Object.fromEntries(people.map(person => [person, window.hdChartNames?.[person] || (person === 'daniel' ? 'Person 1' : person === 'camille' ? 'Person 2' : 'Child')]));
   const gateMarkerMaterial = (person, gate) => natalGates[person]?.has(gate) ? materialFor(person) : transitPurple;
+  const chakraColorForGate = (person, gate) => {
+    const svgRoot = chartData[person]?.paths.find(path => path.userData?.node)?.userData.node.ownerSVGElement;
+    const gateNode = svgRoot?.querySelector(`.gate[data-gate="${gate}"]`);
+    const centerNode = gateNode && svgRoot.querySelector(`.center[data-center="${gateNode.dataset.center}"] .center-shape`);
+    const color = centerNode?.getAttribute('data-base-fill') || centerNode?.style?.getPropertyValue('--chakra-color') || chartColor(person);
+    return new THREE.Color(color);
+  };
   const gateSourceDescription = (person, gate) => {
     const sources = [];
     if (natalGates[person]?.has(gate)) sources.push('natal');
@@ -1752,7 +1821,7 @@ function makeRelationshipGroup(chartData, natalGates, transitSnapshot, pairs = [
         const a = +channel.dataset.from, b = +channel.dataset.to;
         const specs = relationshipLinkSpecs(a, b, personA, personB, natalGates, transitGates);
         if (!specs.length) continue;
-        const pairOverlaps = overlappingKeys.has([personA, personB].sort().join(':'));
+        const pairOverlaps = topDown || overlappingKeys.has([personA, personB].sort().join(':'));
         bridgeCount++;
         const channelId = `${Math.min(a, b)}-${Math.max(a, b)}`;
         const reading = channelDescriptions.get(channelId) || relationshipChannelReadings[channelId];
@@ -1765,7 +1834,9 @@ function makeRelationshipGroup(chartData, natalGates, transitSnapshot, pairs = [
             from: from && chartPointInFamily(from, spec.fromPerson, gateMarkerZ),
             to: to && chartPointInFamily(to, spec.toPerson, gateMarkerZ),
             fromMaterial: gateMarkerMaterial(spec.fromPerson, spec.fromGate),
-            toMaterial: gateMarkerMaterial(spec.toPerson, spec.toGate)
+            toMaterial: gateMarkerMaterial(spec.toPerson, spec.toGate),
+            fromColor: chakraColorForGate(spec.fromPerson, spec.fromGate),
+            toColor: chakraColorForGate(spec.toPerson, spec.toGate)
           };
         });
         const contributors = links.map(link => `${gateSourceDescription(link.fromPerson, link.fromGate)} ↔ ${gateSourceDescription(link.toPerson, link.toGate)}`);
@@ -1803,9 +1874,7 @@ function makeRelationshipGroup(chartData, natalGates, transitSnapshot, pairs = [
           const spline = new THREE.CatmullRomCurve3(points, false, 'centripetal');
           if (pairOverlaps) {
             const transitContributed = !natalGates[link.fromPerson].has(link.fromGate) || !natalGates[link.toPerson].has(link.toGate);
-            const bridges = transitContributed
-              ? dashedTubesFromCurve(spline, 1.25, relationshipTeal)
-              : [new THREE.Mesh(new THREE.TubeGeometry(spline, 96, 1.25, 6, false), relationshipTeal)];
+            const bridges = gradientTubesFromCurve(spline, 1.25, link.fromColor, link.toColor, transitContributed);
             for (const bridge of bridges) {
               Object.assign(bridge.userData, tip);
               group.add(bridge);
@@ -1892,7 +1961,6 @@ function rebuildRelationship() {
   currentNatalGates = natalGates;
   if (planeGroups.daniel) planeGroups.daniel.visible = document.querySelector('#showDaniel').checked;
   if (planeGroups.camille) planeGroups.camille.visible = document.querySelector('#showCamille').checked;
-  const overlapPairs = overlappingChartPairs();
   const exchangePairs = visibleFamilyPairs();
   const relationshipChannels = new Set();
   const channelElements = templateChannels('daniel');
@@ -1987,14 +2055,17 @@ function rebuildRelationship() {
   });
   currentChartData = chartData;
   currentTransitSnapshot = activeTransitSnapshot;
-  releaseGroup(relationshipGroup);
-  activeRelationshipPairKey = overlapPairs.map(pair => pair.join(':')).sort().join('|');
-  relationshipGroup = makeRelationshipGroup(chartData, natalGates, activeTransitSnapshot, overlapPairs);
-  chartRoot.add(relationshipGroup);
-  relationshipGroup.visible = document.querySelector('#showBridges').checked;
   planeGroups.daniel.visible = document.querySelector('#showDaniel').checked;
   planeGroups.camille.visible = document.querySelector('#showCamille').checked;
   syncChartFacing();
+  const overlapPairs = topDownViewActive() ? exchangePairs : overlappingChartPairs();
+  releaseGroup(relationshipGroup);
+  activeRelationshipPairKey = overlapPairs.map(pair => pair.join(':')).sort().join('|');
+  lastRelationshipTopViewAmount = topViewAmount();
+  relationshipGroup = makeRelationshipGroup(chartData, natalGates, activeTransitSnapshot, overlapPairs);
+  chartRoot.add(relationshipGroup);
+  relationshipGroup.visible = document.querySelector('#showBridges').checked;
+  fitCameraToFamily();
   frontFamilyReading();
   const pairNames = overlapPairs.map(pair => pair.map(person => window.hdChartNames?.[person] || (person === 'daniel' ? 'Person 1' : person === 'camille' ? 'Person 2' : 'Child')).join('–'));
   setStatus(`${relationshipGroup.userData.bridgeCount} relationship channel bridge${relationshipGroup.userData.bridgeCount === 1 ? '' : 's'} between overlapping charts${pairNames.length ? ` (${pairNames.join(', ')})` : ''}.`);
@@ -2219,30 +2290,48 @@ function resize() {
   const rect = canvas.getBoundingClientRect();
   if (!rect.width || !rect.height) return;
   renderer.setSize(rect.width, rect.height, false);
+  fitCameraToFamily(rect);
+}
+function fitCameraToFamily(rect = canvas.getBoundingClientRect()) {
+  if (!rect.width || !rect.height) return;
   const aspect = rect.width / rect.height;
   const chartWidth = chartSilhouetteWidth * familyLayout.parentScale;
   const chartHeight = chartViewHeight * familyLayout.parentScale;
-  // Size chart width against the viewport, then expand only if the currently
-  // projected family footprint requires it. A projected-width calculation
-  // avoids shrinking the charts based on the circle's hidden depth.
-  const desiredHalfWidth = rect.width * chartWidth / (rect.width * 0.8);
-  const chartCenters = Object.keys(currentNatalGates || {}).map(person =>
-    chartPointInFamily({ x: 180, y: chartViewHeight / 2 }, person)
-  );
-  let projectedHalfWidth = 0;
-  if (chartCenters.length) {
-    const cameraRight = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
-    chartRoot.updateMatrixWorld(true);
-    projectedHalfWidth = Math.max(...chartCenters.map(center =>
-      Math.abs(chartRoot.localToWorld(center).sub(controls.target).dot(cameraRight))
-    )) + chartWidth / 2 + 8;
+  const halfWidth = chartSilhouetteWidth / 2;
+  const persons = Object.keys(currentNatalGates || {}).filter(person => {
+    if (person === 'daniel') return planeGroups.daniel?.visible ?? true;
+    if (person === 'camille') return planeGroups.camille?.visible ?? true;
+    return familyGroups[person]?.visible ?? true;
+  });
+  chartRoot.updateMatrixWorld(true);
+  camera.updateMatrixWorld(true);
+  const cameraRight = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
+  const cameraUp = new THREE.Vector3(0, 1, 0).applyQuaternion(camera.quaternion);
+  let projectedHalfWidth = 0, projectedHalfHeight = 0;
+  for (const person of persons) {
+    for (const point of [
+      { x: 180 - halfWidth, y: 0 }, { x: 180 + halfWidth, y: 0 },
+      { x: 180 - halfWidth, y: chartViewHeight }, { x: 180 + halfWidth, y: chartViewHeight }
+    ]) {
+      const world = chartRoot.localToWorld(chartPointInFamily(point, person));
+      const relative = world.sub(controls.target);
+      projectedHalfWidth = Math.max(projectedHalfWidth, Math.abs(relative.dot(cameraRight)));
+      projectedHalfHeight = Math.max(projectedHalfHeight, Math.abs(relative.dot(cameraUp)));
+    }
   }
-  const halfWidth = Math.max(desiredHalfWidth, projectedHalfWidth);
-  const halfHeight = Math.max(chartHeight / 2 + 8, halfWidth / aspect);
-  camera.left = -halfWidth;
-  camera.right = halfWidth;
-  camera.top = halfHeight;
-  camera.bottom = -halfHeight;
+  // Keep a single chart large in the default front view, then grow the camera
+  // framing only as needed to fit every visible chart in the tilted family.
+  const fitHalfWidth = Math.max(
+    chartWidth / 0.8,
+    projectedHalfWidth * 1.28 + 8,
+    (projectedHalfHeight * 1.28 + 8) * aspect,
+    chartHeight / 1.7 * aspect
+  );
+  const fitHalfHeight = fitHalfWidth / aspect;
+  camera.left = -fitHalfWidth;
+  camera.right = fitHalfWidth;
+  camera.top = fitHalfHeight;
+  camera.bottom = -fitHalfHeight;
   camera.zoom = 1;
   camera.updateProjectionMatrix();
 }
@@ -2271,6 +2360,12 @@ function orient(mode) {
   controls.target.set(0, familyViewCenterY, 0);
   controls.update();
   syncChartFacing();
+  const currentTopViewAmount = topViewAmount();
+  if (now - lastCameraFitAt > 300 && (Math.abs(currentTopViewAmount - lastFittedTopViewAmount) > 0.025 || currentTopViewAmount > 0.2)) {
+    fitCameraToFamily();
+    lastCameraFitAt = now;
+    lastFittedTopViewAmount = currentTopViewAmount;
+  }
   refreshRelationshipPairing();
 }
 
