@@ -8,6 +8,16 @@ The SVG files in this repository are geometry templates only. They contain no na
 
 https://humandesign.castalia.institute/
 
+## BodyGraph interpretation notes
+
+See [channel direction and particle-flow semantics](docs/channel-direction-model.md) for the distinction between Human Design chart mechanics and the directional simulation used by the BodyGraph visualizer.
+
+See [the circuit metaphor](docs/circuit-metaphor.md) for how the simulation represents center voltage, channel current, and electron-like particles, including the limits of that analogy.
+
+See [Human Design semantic cues](docs/human-design-semantic-cues.md) for the gate, channel, and center terminology reviewed for possible flow-direction clues, including evidence limits and source links.
+
+See [gate-by-gate direction recommendations](docs/gate-direction-recommendations.md) for proposed per-channel arrows, the recommended role of each gate, reasoning, and confidence labels.
+
 ## Local preview
 
 Serve this directory over HTTP (for example `python3 -m http.server 8765`) and open `/relationships/threejs.html` for the relationship viewer or `/relationships/lifetime.html` for the family lifetime transit explorer.
