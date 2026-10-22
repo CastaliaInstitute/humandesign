@@ -997,6 +997,7 @@ function randomPointInPolygon(polygon) {
 }
 function seedCenterParticle(particle) {
   particle.container.attach(particle.bead);
+  particle.bead.scale.setScalar(1);
   const point = randomPointInPolygon(particle.polygon);
   particle.bead.position.set(point.x, point.y, 5.2);
   const angle = Math.random() * Math.PI * 2;
@@ -1061,14 +1062,15 @@ function releaseCenterParticleInto3D(particle) {
   const normal = new THREE.Vector3(0, 0, Math.random() < 0.5 ? -1 : 1).applyQuaternion(rotation).normalize();
   const tangent = particle.velocity.clone().applyQuaternion(rotation).normalize();
   const lateral = new THREE.Vector3(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).normalize();
-  particle.escapeVelocity = normal.multiplyScalar(9 + Math.random() * 8)
-    .addScaledVector(tangent, 3 + Math.random() * 4)
-    .addScaledVector(lateral, 2 + Math.random() * 2);
+  particle.escapeVelocity = normal.multiplyScalar(34 + Math.random() * 18)
+    .addScaledVector(tangent, 10 + Math.random() * 8)
+    .addScaledVector(lateral, 8 + Math.random() * 8);
   scene.attach(particle.bead);
   particle.bead.position.copy(worldPosition);
+  particle.bead.scale.setScalar(1);
   particle.state = 'escaped';
   particle.age = 0;
-  particle.escapeDuration = 1.2 + Math.random() * 1.2;
+  particle.escapeDuration = 0.75 + Math.random() * 0.45;
 }
 function releaseParticleInto3D(flow) {
   const parent = flow.bead.parent;
@@ -1081,11 +1083,12 @@ function releaseParticleInto3D(flow) {
   tangent.applyQuaternion(worldRotation).normalize();
   const normal = new THREE.Vector3(0, 0, Math.random() < 0.5 ? -1 : 1).applyQuaternion(worldRotation).normalize();
   const lateral = new THREE.Vector3(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).normalize();
-  flow.escapeVelocity = normal.multiplyScalar(11 + Math.random() * 8)
-    .addScaledVector(tangent, 3 + Math.random() * 4)
-    .addScaledVector(lateral, 2 + Math.random() * 3);
+  flow.escapeVelocity = normal.multiplyScalar(42 + Math.random() * 22)
+    .addScaledVector(tangent, 12 + Math.random() * 8)
+    .addScaledVector(lateral, 8 + Math.random() * 8);
   scene.attach(flow.bead);
   flow.bead.position.copy(worldPosition);
+  flow.bead.scale.setScalar(1);
   const receiver = findReceivingChannel(flow);
   if (receiver) {
     const targetReverse = receiver.transport.fromGate === flow.transport.exitGate
@@ -1111,7 +1114,7 @@ function releaseParticleInto3D(flow) {
   }
   flow.state = 'escaped';
   flow.escapeAge = 0;
-  flow.escapeDuration = 1.5 + Math.random() * 1.3;
+  flow.escapeDuration = 0.8 + Math.random() * 0.45;
 }
 function findReceivingChannel(flow) {
   if (!flow.transport) return null;
@@ -1160,6 +1163,7 @@ function arriveAtReceivingChannel(flow) {
 function recycleParticleIntoPlane(flow) {
   if (!flow.container) return;
   flow.container.attach(flow.bead);
+  flow.bead.scale.setScalar(1);
   flow.bead.rotation.set(0, 0, 0);
   flow.bead.position.copy(flow.curve.getPointAt(flow.reverse ? 1 : 0));
   flow.progress = flow.phase;
@@ -2559,6 +2563,8 @@ function animate() {
       velocity.y -= delta * 0.45;
       velocity.multiplyScalar(Math.pow(0.94, delta));
       position.addScaledVector(velocity, delta);
+      const fade = THREE.MathUtils.clamp(1 - flow.escapeAge / flow.escapeDuration, 0, 1);
+      flow.bead.scale.setScalar(fade * fade);
       if (flow.escapeAge >= flow.escapeDuration) recycleParticleIntoPlane(flow);
     }
     const pulse = 0.76 + 0.24 * Math.sin(elapsed * 5.2 + flow.phase * Math.PI * 2);
@@ -2601,6 +2607,8 @@ function animate() {
       velocity.y -= delta * 0.35;
       velocity.multiplyScalar(Math.pow(0.95, delta));
       position.addScaledVector(velocity, delta);
+      const fade = THREE.MathUtils.clamp(1 - particle.age / particle.escapeDuration, 0, 1);
+      particle.bead.scale.setScalar(fade * fade);
       if (particle.age >= particle.escapeDuration) seedCenterParticle(particle);
     }
     const pulse = 0.74 + 0.26 * Math.sin(elapsed * 4.6 + particle.age * 1.2);
