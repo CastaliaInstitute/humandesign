@@ -945,8 +945,42 @@ function addFlowMotion(target, curve, color, hover = null, reverse = false, size
     const trainPhase = index / particleCount;
     const phase = (trainPhase + phaseOffset + Math.random() * 0.035) % 1;
     const speed = 22 + Math.random() * 10;
-    flowAnimations.push({ bead, glow, glowMaterial, curve, reverse, phase, duration: THREE.MathUtils.clamp(length / speed, 0.9, 5.5) });
+    flowAnimations.push({
+      bead, glow, glowMaterial, curve, container: target, reverse, phase,
+      progress: phase, state: 'plane', escapeAge: 0,
+      duration: THREE.MathUtils.clamp(length / speed, 0.9, 5.5)
+    });
   }
+}
+function releaseParticleInto3D(flow) {
+  const parent = flow.bead.parent;
+  if (!parent) return;
+  const endpoint = flow.reverse ? 0 : 1;
+  const worldPosition = flow.bead.getWorldPosition(new THREE.Vector3());
+  const worldRotation = parent.getWorldQuaternion(new THREE.Quaternion());
+  const tangent = flow.curve.getTangentAt(endpoint).normalize();
+  if (flow.reverse) tangent.negate();
+  tangent.applyQuaternion(worldRotation).normalize();
+  const normal = new THREE.Vector3(0, 0, Math.random() < 0.5 ? -1 : 1).applyQuaternion(worldRotation).normalize();
+  const lateral = new THREE.Vector3(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).normalize();
+  flow.escapeVelocity = normal.multiplyScalar(11 + Math.random() * 8)
+    .addScaledVector(tangent, 3 + Math.random() * 4)
+    .addScaledVector(lateral, 2 + Math.random() * 3);
+  scene.attach(flow.bead);
+  flow.bead.position.copy(worldPosition);
+  flow.state = 'escaped';
+  flow.escapeAge = 0;
+  flow.escapeDuration = 1.5 + Math.random() * 1.3;
+}
+function recycleParticleIntoPlane(flow) {
+  if (!flow.container) return;
+  flow.container.attach(flow.bead);
+  flow.bead.rotation.set(0, 0, 0);
+  flow.bead.position.copy(flow.curve.getPointAt(flow.reverse ? 1 : 0));
+  flow.progress = flow.phase;
+  flow.state = 'plane';
+  flow.escapeAge = 0;
+  flow.escapeVelocity = null;
 }
 function outlineFromSubPath(target, subPath, material, z, hover = null) {
   // Sample the SVG curves directly. Passing these samples through a second
@@ -2232,8 +2266,21 @@ function animate() {
   for (const flow of flowAnimations) {
     flow.bead.visible = channelFlowEnabled;
     if (!channelFlowEnabled) continue;
-    const progress = (elapsed / flow.duration + flow.phase) % 1;
-    flow.bead.position.copy(flow.curve.getPointAt(flow.reverse ? 1 - progress : progress));
+    if (flow.state === 'plane') {
+      flow.progress = Math.min(1, flow.progress + delta / flow.duration);
+      flow.bead.position.copy(flow.curve.getPointAt(flow.reverse ? 1 - flow.progress : flow.progress));
+      if (flow.progress >= 1) releaseParticleInto3D(flow);
+    } else {
+      flow.escapeAge += delta;
+      const velocity = flow.escapeVelocity;
+      const position = flow.bead.position;
+      const swirl = new THREE.Vector3(-position.z, 0, position.x).normalize();
+      velocity.addScaledVector(swirl, delta * 2.4);
+      velocity.y -= delta * 0.45;
+      velocity.multiplyScalar(Math.pow(0.94, delta));
+      position.addScaledVector(velocity, delta);
+      if (flow.escapeAge >= flow.escapeDuration) recycleParticleIntoPlane(flow);
+    }
     const pulse = 0.76 + 0.24 * Math.sin(elapsed * 5.2 + flow.phase * Math.PI * 2);
     flow.glow.scale.setScalar(pulse);
     flow.glowMaterial.opacity = 0.24 + pulse * 0.22;
