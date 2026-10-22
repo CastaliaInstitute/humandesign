@@ -919,7 +919,7 @@ function dashedTubesFromCurve(curve, radius, material, dashLength = 7, gapLength
   }
   return meshes;
 }
-function addFlowMotion(target, curve, color, hover = null, reverse = false, size = 1, phaseOffset = 0, particleCount = 1) {
+function addFlowMotion(target, curve, color, hover = null, reverse = false, size = 1, phaseOffset = 0, particleCount = 1, transport = null) {
   if (!curve) return;
   const length = curve.getLength();
   for (let index = 0; index < particleCount; index++) {
@@ -946,7 +946,7 @@ function addFlowMotion(target, curve, color, hover = null, reverse = false, size
     const phase = (trainPhase + phaseOffset + Math.random() * 0.035) % 1;
     const speed = 22 + Math.random() * 10;
     flowAnimations.push({
-      bead, glow, glowMaterial, curve, container: target, reverse, phase,
+      bead, glow, glowMaterial, curve, container: target, reverse, phase, transport,
       progress: phase, state: 'plane', escapeAge: 0,
       duration: THREE.MathUtils.clamp(length / speed, 0.9, 5.5)
     });
@@ -968,9 +968,76 @@ function releaseParticleInto3D(flow) {
     .addScaledVector(lateral, 2 + Math.random() * 3);
   scene.attach(flow.bead);
   flow.bead.position.copy(worldPosition);
+  const receiver = findReceivingChannel(flow);
+  if (receiver) {
+    const targetReverse = receiver.transport.fromGate === flow.transport.exitGate
+      ? false
+      : receiver.transport.toGate === flow.transport.exitGate ? true : receiver.reverse;
+    const endpoint = receiver.curve.getPointAt(targetReverse ? 1 : 0);
+    const target = receiver.container.localToWorld(endpoint.clone());
+    const distance = worldPosition.distanceTo(target);
+    const targetNormal = new THREE.Vector3(0, 0, 1)
+      .applyQuaternion(receiver.container.getWorldQuaternion(new THREE.Quaternion())).normalize();
+    const lift = Math.min(130, 35 + distance * 0.22);
+    flow.transitStart = worldPosition.clone();
+    flow.transitControl1 = worldPosition.clone().addScaledVector(normal, lift).addScaledVector(tangent, 28);
+    flow.transitReceiver = receiver;
+    flow.transitReverse = targetReverse;
+    flow.transitDuration = THREE.MathUtils.clamp(distance / (52 + Math.random() * 22), 1.4, 8);
+    flow.transitProgress = 0;
+    flow.state = 'transit';
+    flow.escapeAge = 0;
+    flow.targetNormal = targetNormal;
+    flow.transitLift = lift;
+    return;
+  }
   flow.state = 'escaped';
   flow.escapeAge = 0;
   flow.escapeDuration = 1.5 + Math.random() * 1.3;
+}
+function findReceivingChannel(flow) {
+  if (!flow.transport) return null;
+  const visiblePerson = person => planeGroups[person]
+    ? planeGroups[person].visible
+    : (familyGroups[person]?.visible ?? false);
+  const candidates = flowAnimations.filter(candidate =>
+    candidate !== flow && candidate.state === 'plane' && candidate.transport
+    && candidate.transport.person !== flow.transport.person
+    && visiblePerson(candidate.transport.person)
+    && candidate.container?.visible !== false
+  );
+  if (!candidates.length) return null;
+  const matchingGate = candidates.filter(candidate =>
+    candidate.transport.fromGate === flow.transport.exitGate
+    || candidate.transport.toGate === flow.transport.exitGate
+  );
+  const pool = matchingGate.length ? matchingGate : candidates;
+  return pool[Math.floor(Math.random() * pool.length)];
+}
+function arriveAtReceivingChannel(flow) {
+  const receiver = flow.transitReceiver;
+  if (!receiver?.container) {
+    recycleParticleIntoPlane(flow);
+    return;
+  }
+  flow.container = receiver.container;
+  flow.curve = receiver.curve;
+  flow.reverse = flow.transitReverse;
+  flow.transport = {
+    ...receiver.transport,
+    exitGate: flow.reverse ? receiver.transport.fromGate : receiver.transport.toGate
+  };
+  flow.duration = receiver.duration;
+  flow.container.attach(flow.bead);
+  flow.bead.rotation.set(0, 0, 0);
+  flow.bead.position.copy(flow.curve.getPointAt(flow.reverse ? 1 : 0));
+  flow.progress = 0;
+  flow.state = 'plane';
+  flow.transitReceiver = null;
+  flow.transitControl1 = null;
+  flow.targetNormal = null;
+  flow.transitStart = null;
+  flow.transitLift = null;
 }
 function recycleParticleIntoPlane(flow) {
   if (!flow.container) return;
@@ -1180,8 +1247,16 @@ function makePlaneGroup(paths, person, sharedChannels, relationshipChannels, opt
           const isReturnLane = cls.split(/\s+/).includes('paired-rail');
           if (isReturnLane) flowPoints.reverse();
           const flowCurve = new THREE.CatmullRomCurve3(flowPoints.map(point => new THREE.Vector3(point.x, point.y, 4.3)), false, 'centripetal');
-          addFlowMotion(group, flowCurve, '#ffc247', hover, false, 1, 0, 3);
-          addFlowMotion(group, flowCurve, '#a6edf7', hover, true, 0.82, 0.5, 2);
+          const [fromGate, toGate] = isReturnLane
+            ? [channel.dataset.to, channel.dataset.from]
+            : startsAtFrom === false ? [channel.dataset.to, channel.dataset.from] : [channel.dataset.from, channel.dataset.to];
+          const channelTransport = { person, channelId, fromGate, toGate };
+          addFlowMotion(group, flowCurve, '#ffc247', hover, false, 1, 0, 3, {
+            ...channelTransport, exitGate: toGate
+          });
+          addFlowMotion(group, flowCurve, '#a6edf7', hover, true, 0.82, 0.5, 2, {
+            ...channelTransport, exitGate: fromGate
+          });
         }
         if (active && points.length > 5) {
           const divider = tubeFromPoints(points, 0.22, laneMat, 2.6);
@@ -2270,6 +2345,26 @@ function animate() {
       flow.progress = Math.min(1, flow.progress + delta / flow.duration);
       flow.bead.position.copy(flow.curve.getPointAt(flow.reverse ? 1 - flow.progress : flow.progress));
       if (flow.progress >= 1) releaseParticleInto3D(flow);
+    } else if (flow.state === 'transit') {
+      const receiver = flow.transitReceiver;
+      if (!receiver?.container) {
+        recycleParticleIntoPlane(flow);
+      } else {
+        flow.transitProgress = Math.min(1, flow.transitProgress + delta / flow.transitDuration);
+        const targetLocal = receiver.curve.getPointAt(flow.transitReverse ? 1 : 0);
+        const targetWorld = receiver.container.localToWorld(targetLocal.clone());
+        const targetNormal = new THREE.Vector3(0, 0, 1)
+          .applyQuaternion(receiver.container.getWorldQuaternion(new THREE.Quaternion())).normalize();
+        const control2 = targetWorld.clone().addScaledVector(targetNormal, flow.transitLift);
+        const t = flow.transitProgress;
+        const u = 1 - t;
+        flow.bead.position.set(
+          u ** 3 * flow.transitStart.x + 3 * u ** 2 * t * flow.transitControl1.x + 3 * u * t ** 2 * control2.x + t ** 3 * targetWorld.x,
+          u ** 3 * flow.transitStart.y + 3 * u ** 2 * t * flow.transitControl1.y + 3 * u * t ** 2 * control2.y + t ** 3 * targetWorld.y,
+          u ** 3 * flow.transitStart.z + 3 * u ** 2 * t * flow.transitControl1.z + 3 * u * t ** 2 * control2.z + t ** 3 * targetWorld.z
+        );
+        if (flow.transitProgress >= 1) arriveAtReceivingChannel(flow);
+      }
     } else {
       flow.escapeAge += delta;
       const velocity = flow.escapeVelocity;
