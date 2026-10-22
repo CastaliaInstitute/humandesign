@@ -1722,6 +1722,8 @@ function extractLayer(doc, person, gates, activations = []) {
     center.setAttribute('data-defined', String(count > 0));
     center.setAttribute('data-channel-count', String(count));
     center.setAttribute('data-active-gate-count', String(activeGateCount));
+    const shape = center.querySelector('.center-shape');
+    if (shape) shape.style.fillOpacity = count > 0 ? '.22' : '';
   });
   svg.querySelectorAll('script,#gate-state-legend,#flow-control,#flow-direction-legend,#svg-tooltip').forEach(el => el.remove());
   svg.setAttribute('viewBox', '0 0 360 360');
