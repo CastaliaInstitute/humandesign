@@ -1659,21 +1659,23 @@ function refreshRelationshipPairing(force = false) {
   // the drag settles and cap refreshes during damping and auto-rotation.
   if (orbitDragging && !force) return;
   const now = performance.now();
-  if (!force && now - lastRelationshipRefreshAt < 300) return;
+  if (!force && now - lastRelationshipRefreshAt < 1000) return;
   const pairs = overlappingChartPairs();
   const key = pairs.map(pair => pair.join(':')).sort().join('|');
   const facingAngle = cameraAzimuth() - familyAzimuth;
   const facingDelta = lastRelationshipFacingAngle === null ? Infinity :
     Math.abs(THREE.MathUtils.euclideanModulo(facingAngle - lastRelationshipFacingAngle + Math.PI, Math.PI * 2) - Math.PI);
   const pairChanged = key !== activeRelationshipPairKey;
-  if (!pairChanged && facingDelta < THREE.MathUtils.degToRad(0.5)) return;
+  if (!pairChanged && facingDelta < THREE.MathUtils.degToRad(2)) return;
   lastRelationshipRefreshAt = now;
   activeRelationshipPairKey = key;
   lastRelationshipFacingAngle = facingAngle;
-  releaseGroup(relationshipGroup);
+  // Bridge flow beads are direct children of this group. Remove their update
+  // records before disposal; a detached Three.js group still owns its children.
   for (let i = flowAnimations.length - 1; i >= 0; i--) {
-    if (!flowAnimations[i].bead.parent) flowAnimations.splice(i, 1);
+    if (flowAnimations[i].bead.parent === relationshipGroup) flowAnimations.splice(i, 1);
   }
+  releaseGroup(relationshipGroup);
   relationshipGroup = makeRelationshipGroup(currentChartData, currentNatalGates, currentTransitSnapshot, visibleFamilyPairs());
   chartRoot.add(relationshipGroup);
   relationshipGroup.visible = document.querySelector('#showBridges').checked;
