@@ -2435,12 +2435,12 @@ function loadFeatureDescriptions(svgDocument) {
 
 async function init() {
   try {
-    const response = await fetch('../bodygraph.svg');
+    const response = await fetch('../bodygraph.svg?v=family-heart-out-20261022');
     if (!response.ok) throw new Error(`bodygraph.svg returned ${response.status}`);
     sourceDocument = new DOMParser().parseFromString(await response.text(), 'image/svg+xml');
     if (sourceDocument.querySelector('parsererror')) throw new Error('bodygraph.svg could not be parsed');
     try {
-      const descriptionsResponse = await fetch('../bodygraph.svg');
+      const descriptionsResponse = await fetch('../bodygraph.svg?v=family-heart-out-20261022');
       if (descriptionsResponse.ok) {
         const descriptionsDocument = new DOMParser().parseFromString(await descriptionsResponse.text(), 'image/svg+xml');
         if (!descriptionsDocument.querySelector('parsererror')) loadFeatureDescriptions(descriptionsDocument);
