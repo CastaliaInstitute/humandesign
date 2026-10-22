@@ -124,8 +124,13 @@ const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').match
 let channelFlowEnabled = true;
 let autoRotate = !reduceMotion;
 const autoRotateSpeed = 0.035; // radians per second; one slow turn takes about three minutes
-const colors = { daniel: new THREE.Color('#087fa5'), camille: new THREE.Color('#cf4f79') };
-const childPalette = ['#488f73', '#b67a37', '#7864a6', '#518a9d'].map(color => new THREE.Color(color));
+const colors = {
+  daniel: new THREE.Color('#1689d4'),
+  camille: new THREE.Color('#dc5261'),
+  finn: new THREE.Color('#87d9ff'),
+  aleia: new THREE.Color('#ee91c3')
+};
+const childPalette = [colors.aleia, colors.finn];
 const familyLayout = { parentScale: parentChartScale, childScale: parentChartScale, parentRadius: 220 };
 function childPlaneRadius() {
   return Number(document.querySelector('#separation').value) / 2;
@@ -133,7 +138,33 @@ function childPlaneRadius() {
 function chartColor(person) {
   if (colors[person]) return colors[person];
   const childIndex = Math.max(0, familyChildren.findIndex(child => child.id === person));
+  const childName = familyChildren[childIndex]?.name?.toLowerCase() || '';
+  if (childName.includes('finn')) return colors.finn;
+  if (childName.includes('aleia')) return colors.aleia;
   return childPalette[childIndex % childPalette.length];
+}
+function addChartColorShadow(group, color) {
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = 256;
+  const context = canvas.getContext('2d');
+  if (!context) return;
+  const gradient = context.createRadialGradient(128, 128, 10, 128, 128, 128);
+  const rgb = [color.r, color.g, color.b].map(value => Math.round(value * 255));
+  gradient.addColorStop(0, `rgba(${rgb.join(',')},0.075)`);
+  gradient.addColorStop(0.58, `rgba(${rgb.join(',')},0.045)`);
+  gradient.addColorStop(1, `rgba(${rgb.join(',')},0)`);
+  context.fillStyle = gradient;
+  context.fillRect(0, 0, 256, 256);
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  const shadow = new THREE.Mesh(
+    new THREE.PlaneGeometry(440, 440),
+    new THREE.MeshBasicMaterial({ map: texture, transparent: true, opacity: 0.55, depthWrite: false, toneMapped: false, side: THREE.DoubleSide })
+  );
+  shadow.position.set(180, 180, -3);
+  shadow.renderOrder = -1;
+  shadow.userData.chartColorShadow = true;
+  group.add(shadow);
 }
 function chartTextColor(person) {
   // Darken the chart swatch for readable text on the light reading panel.
@@ -1454,6 +1485,7 @@ function makePlaneGroup(paths, person, sharedChannels, relationshipChannels, opt
     if (!activationsByGate.has(activation.gate)) activationsByGate.set(activation.gate, []);
     activationsByGate.get(activation.gate).push(activation);
   }
+  addChartColorShadow(group, color);
   addBodygraphSvgPlane(group, paths);
   const gatePoints = getGatePoints(paths);
   for (const path of paths) {
@@ -2034,7 +2066,7 @@ function rebuildRelationship() {
     const childGates = natalGates[child.id];
     const childData = loader.parse(extractLayer(sourceDocument, 'daniel', childGates, child.activations || []));
     chartData[child.id] = childData;
-    const color = childPalette[index % childPalette.length];
+    const color = chartColor(child.id);
     const childGroup = makePlaneGroup(childData.paths, child.id, new Set(), relationshipChannels, {
       color, name: child.name, scale: childScale, flipX, transitSnapshot: activeTransitSnapshot
     });
