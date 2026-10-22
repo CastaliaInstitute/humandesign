@@ -49,15 +49,20 @@ const chartRoot = new THREE.Group();
 scene.add(chartRoot);
 const ambientParticles = new THREE.Points(
   new THREE.BufferGeometry(),
-  new THREE.PointsMaterial({ color: '#8bd8ff', size: 1.8, transparent: true, opacity: 0.52, depthWrite: false, sizeAttenuation: true })
+  new THREE.PointsMaterial({ color: '#8bd8ff', size: 1.25, transparent: true, opacity: 0.28, depthWrite: false, sizeAttenuation: true })
 );
-const ambientParticlePositions = new Float32Array(560 * 3);
-for (let i = 0; i < 560; i++) {
+const ambientParticleCount = 280;
+const ambientParticlePositions = new Float32Array(ambientParticleCount * 3);
+const ambientParticleVelocities = new Float32Array(ambientParticleCount * 3);
+for (let i = 0; i < ambientParticleCount; i++) {
   const radius = 280 + Math.random() * 650;
   const angle = Math.random() * Math.PI * 2;
   ambientParticlePositions[i * 3] = Math.cos(angle) * radius;
   ambientParticlePositions[i * 3 + 1] = Math.random() * 600 - 80;
   ambientParticlePositions[i * 3 + 2] = Math.sin(angle) * radius;
+  ambientParticleVelocities[i * 3] = -Math.sin(angle) * (5 + Math.random() * 6) + (Math.random() - 0.5) * 2;
+  ambientParticleVelocities[i * 3 + 1] = (Math.random() - 0.5) * 1.8;
+  ambientParticleVelocities[i * 3 + 2] = Math.cos(angle) * (5 + Math.random() * 6) + (Math.random() - 0.5) * 2;
 }
 ambientParticles.geometry.setAttribute('position', new THREE.BufferAttribute(ambientParticlePositions, 3));
 scene.add(ambientParticles);
@@ -914,29 +919,34 @@ function dashedTubesFromCurve(curve, radius, material, dashLength = 7, gapLength
   }
   return meshes;
 }
-function addFlowMotion(target, curve, color, hover = null, reverse = false, size = 1, phaseOffset = 0) {
+function addFlowMotion(target, curve, color, hover = null, reverse = false, size = 1, phaseOffset = 0, particleCount = 1) {
   if (!curve) return;
-  const bead = new THREE.Group();
-  const glow = new THREE.Mesh(
-    new THREE.SphereGeometry(1.65 * size, 12, 10),
-    new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.52, depthWrite: false, toneMapped: false })
-  );
-  const coreColor = new THREE.Color(color).lerp(new THREE.Color('#fffdf2'), 0.72);
-  const core = new THREE.Mesh(
-    new THREE.SphereGeometry(0.95 * size, 12, 10),
-    new THREE.MeshBasicMaterial({ color: coreColor, toneMapped: false })
-  );
-  glow.renderOrder = 5;
-  core.renderOrder = 6;
-  bead.add(glow, core);
-  if (hover) {
-    Object.assign(bead.userData, hover);
-    Object.assign(glow.userData, hover);
-    Object.assign(core.userData, hover);
+  const length = curve.getLength();
+  for (let index = 0; index < particleCount; index++) {
+    const bead = new THREE.Group();
+    const particleSize = size * (0.82 + Math.random() * 0.36);
+    const glowMaterial = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.38, depthWrite: false, toneMapped: false });
+    const glow = new THREE.Mesh(new THREE.SphereGeometry(1.9 * particleSize, 10, 8), glowMaterial);
+    const coreColor = new THREE.Color(color).lerp(new THREE.Color('#fffdf2'), 0.72);
+    const core = new THREE.Mesh(
+      new THREE.SphereGeometry(0.82 * particleSize, 10, 8),
+      new THREE.MeshBasicMaterial({ color: coreColor, toneMapped: false })
+    );
+    glow.renderOrder = 5;
+    core.renderOrder = 6;
+    bead.add(glow, core);
+    if (hover) {
+      Object.assign(bead.userData, hover);
+      Object.assign(glow.userData, hover);
+      Object.assign(core.userData, hover);
+    }
+    target.add(bead);
+    bead.visible = channelFlowEnabled;
+    const trainPhase = index / particleCount;
+    const phase = (trainPhase + phaseOffset + Math.random() * 0.035) % 1;
+    const speed = 22 + Math.random() * 10;
+    flowAnimations.push({ bead, glow, glowMaterial, curve, reverse, phase, duration: THREE.MathUtils.clamp(length / speed, 0.9, 5.5) });
   }
-  target.add(bead);
-  bead.visible = channelFlowEnabled;
-  flowAnimations.push({ bead, curve, reverse, phase: (flowAnimations.length * 0.381966 + phaseOffset) % 1, duration: 2.6 });
 }
 function outlineFromSubPath(target, subPath, material, z, hover = null) {
   // Sample the SVG curves directly. Passing these samples through a second
@@ -1136,7 +1146,8 @@ function makePlaneGroup(paths, person, sharedChannels, relationshipChannels, opt
           const isReturnLane = cls.split(/\s+/).includes('paired-rail');
           if (isReturnLane) flowPoints.reverse();
           const flowCurve = new THREE.CatmullRomCurve3(flowPoints.map(point => new THREE.Vector3(point.x, point.y, 4.3)), false, 'centripetal');
-          addFlowMotion(group, flowCurve, isReturnLane ? '#a6edf7' : '#ffc247', hover);
+          addFlowMotion(group, flowCurve, '#ffc247', hover, false, 1, 0, 3);
+          addFlowMotion(group, flowCurve, '#a6edf7', hover, true, 0.82, 0.5, 2);
         }
         if (active && points.length > 5) {
           const divider = tubeFromPoints(points, 0.22, laneMat, 2.6);
@@ -1474,8 +1485,7 @@ function makeRelationshipGroup(chartData, natalGates, transitSnapshot, pairs = [
           // One-way streams follow the gate completion direction. Stagger a pair
           // of bright chart-colored particles so cross-family movement is easy to see.
           const exchangeColor = chartColor(link.fromPerson).getStyle();
-          addFlowMotion(group, spline, exchangeColor, tip, false, 1.35, 0);
-          addFlowMotion(group, spline, exchangeColor, tip, false, 1.35, 0.5);
+          addFlowMotion(group, spline, exchangeColor, tip, false, 1.15, 0, 3);
           for (const [point, material] of [[link.from, link.fromMaterial], [link.to, link.toMaterial]]) {
             const bead = new THREE.Mesh(new THREE.SphereGeometry(2.3, 10, 8), material);
             bead.position.copy(point);
@@ -2208,9 +2218,15 @@ function animate() {
   const elapsed = now / 1000;
   ambientParticles.rotation.y = elapsed * 0.006;
   const ambientPositions = ambientParticles.geometry.attributes.position.array;
-  for (let i = 1; i < ambientPositions.length; i += 3) {
-    ambientPositions[i] += 0.035;
-    if (ambientPositions[i] > 520) ambientPositions[i] = -80;
+  for (let i = 0; i < ambientParticleCount; i++) {
+    const offset = i * 3;
+    const phase = elapsed * 0.08 + i * 0.17;
+    ambientPositions[offset] += ambientParticleVelocities[offset] * delta + Math.sin(phase) * delta * 1.1;
+    ambientPositions[offset + 1] += ambientParticleVelocities[offset + 1] * delta + Math.cos(phase * 0.7) * delta * 0.35;
+    ambientPositions[offset + 2] += ambientParticleVelocities[offset + 2] * delta + Math.cos(phase) * delta * 1.1;
+    if (Math.abs(ambientPositions[offset]) > 980) ambientParticleVelocities[offset] *= -1;
+    if (ambientPositions[offset + 1] > 560 || ambientPositions[offset + 1] < -100) ambientParticleVelocities[offset + 1] *= -1;
+    if (Math.abs(ambientPositions[offset + 2]) > 980) ambientParticleVelocities[offset + 2] *= -1;
   }
   ambientParticles.geometry.attributes.position.needsUpdate = true;
   for (const flow of flowAnimations) {
@@ -2218,6 +2234,9 @@ function animate() {
     if (!channelFlowEnabled) continue;
     const progress = (elapsed / flow.duration + flow.phase) % 1;
     flow.bead.position.copy(flow.curve.getPointAt(flow.reverse ? 1 - progress : progress));
+    const pulse = 0.76 + 0.24 * Math.sin(elapsed * 5.2 + flow.phase * Math.PI * 2);
+    flow.glow.scale.setScalar(pulse);
+    flow.glowMaterial.opacity = 0.24 + pulse * 0.22;
   }
   renderer.render(scene, camera);
   requestAnimationFrame(animate);
