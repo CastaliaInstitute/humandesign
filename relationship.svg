@@ -229,7 +229,7 @@
       <g id="d-center-g" class="center" data-center="g" data-defined="false" data-gate-grid="standard" transform="translate(180.0000 209.1879) scale(.9 1) translate(-180.0000 -209.1879)">
         <polygon class="center-shape" points="180.0,176.188 203.571,209.188 180.0,242.188 156.429,209.188" fill="#56a35c" />
       </g>
-      <g id="d-center-ego" class="center" data-center="ego" data-defined="false" data-gate-grid="standard" transform="translate(212 230) rotate(30) scale(.84) translate(-237 -200.8485)">
+      <g id="d-center-ego" class="center" data-center="ego" data-defined="false" data-gate-grid="standard">
         <polygon class="center-shape" points="232.00,188.85 247.00,200.85 232.00,212.85" fill="#63aa66" />
       </g>
       <g id="d-center-spleen" class="center" data-center="spleen" data-defined="false" data-gate-grid="standard" transform="translate(134.5476 259.2240) scale(.9) translate(-134.5476 -259.2240)">
@@ -635,7 +635,7 @@
       <g id="c-center-g" class="center" data-center="g" data-defined="false" data-gate-grid="standard" transform="translate(180.0000 209.1879) scale(.9 1) translate(-180.0000 -209.1879)">
         <polygon class="center-shape" points="180.0,176.188 203.571,209.188 180.0,242.188 156.429,209.188" fill="#56a35c" />
       </g>
-      <g id="c-center-ego" class="center" data-center="ego" data-defined="false" data-gate-grid="standard" transform="translate(212 230) rotate(30) scale(.84) translate(-237 -200.8485)">
+      <g id="c-center-ego" class="center" data-center="ego" data-defined="false" data-gate-grid="standard">
         <polygon class="center-shape" points="232.00,188.85 247.00,200.85 232.00,212.85" fill="#63aa66" />
       </g>
       <g id="c-center-spleen" class="center" data-center="spleen" data-defined="false" data-gate-grid="standard" transform="translate(134.5476 259.2240) scale(.9) translate(-134.5476 -259.2240)">
