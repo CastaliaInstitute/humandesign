@@ -34,6 +34,9 @@ const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
 controls.dampingFactor = 0.035;
 controls.rotateSpeed = 0.65;
+controls.enableZoom = true;
+controls.touches.ONE = THREE.TOUCH.ROTATE;
+controls.touches.TWO = THREE.TOUCH.DOLLY_PAN;
 controls.target.set(0, familyViewCenterY, 0);
 controls.minDistance = 330;
 controls.maxDistance = 1450;
@@ -2528,6 +2531,8 @@ let selectedKey = null;
 let highlightedKey = null;
 let highlighted = [];
 let touchStart = null;
+const activeTouchPointers = new Set();
+let multiTouchGesture = false;
 let lastTouchSelectionAt = -Infinity;
 function clearHighlight() {
   for (const { mesh, material, highlightedMaterial } of highlighted) {
@@ -2646,11 +2651,30 @@ canvas.addEventListener('pointermove', event => {
 canvas.addEventListener('pointerleave', event => { if (event.pointerType !== 'touch') clearHover(); });
 canvas.addEventListener('pointerdown', event => {
   pauseAutoRotate();
-  if (event.pointerType === 'touch') touchStart = { x: event.clientX, y: event.clientY };
+  if (event.pointerType !== 'touch') return;
+  activeTouchPointers.add(event.pointerId);
+  if (activeTouchPointers.size === 1 && !multiTouchGesture) {
+    touchStart = { id: event.pointerId, x: event.clientX, y: event.clientY };
+    return;
+  }
+  // Once a second finger is down, OrbitControls owns the gesture as a pinch.
+  // Do not interpret either finger lifting as a tap on a chart feature.
+  touchStart = null;
+  multiTouchGesture = true;
+  lastTouchSelectionAt = performance.now();
 });
 canvas.addEventListener('wheel', pauseAutoRotate, { passive: true });
 canvas.addEventListener('pointerup', event => {
-  if (event.pointerType !== 'touch' || !touchStart) return;
+  if (event.pointerType !== 'touch') return;
+  activeTouchPointers.delete(event.pointerId);
+  if (multiTouchGesture) {
+    if (activeTouchPointers.size === 0) {
+      multiTouchGesture = false;
+      lastTouchSelectionAt = performance.now();
+    }
+    return;
+  }
+  if (!touchStart || touchStart.id !== event.pointerId) return;
   const moved = Math.hypot(event.clientX - touchStart.x, event.clientY - touchStart.y);
   touchStart = null;
   if (moved > 10) return;
@@ -2658,6 +2682,12 @@ canvas.addEventListener('pointerup', event => {
   if (!hit) { selectedKey = null; clearHover(); return; }
   lastTouchSelectionAt = performance.now();
   selectFeature(hit.object.userData.hoverTip, hit.object.userData.hoverKey, event.clientX, event.clientY);
+});
+canvas.addEventListener('pointercancel', event => {
+  if (event.pointerType !== 'touch') return;
+  activeTouchPointers.delete(event.pointerId);
+  touchStart = null;
+  if (activeTouchPointers.size === 0) multiTouchGesture = false;
 });
 canvas.addEventListener('click', event => {
   if (event.detail === 0 || performance.now() - lastTouchSelectionAt < 500) return;
