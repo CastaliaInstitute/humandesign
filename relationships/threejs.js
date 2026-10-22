@@ -2225,7 +2225,7 @@ function resize() {
   // Size chart width against the viewport, then expand only if the currently
   // projected family footprint requires it. A projected-width calculation
   // avoids shrinking the charts based on the circle's hidden depth.
-  const desiredHalfWidth = rect.width * chartWidth / (rect.width * 0.4);
+  const desiredHalfWidth = rect.width * chartWidth / (rect.width * 0.8);
   const chartCenters = Object.keys(currentNatalGates || {}).map(person =>
     chartPointInFamily({ x: 180, y: chartViewHeight / 2 }, person)
   );
