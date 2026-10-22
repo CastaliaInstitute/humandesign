@@ -565,7 +565,7 @@ function frontFamilyReading() {
           gate,
           name: gateDescriptions.get(gate)?.name || '',
           natalOwners: [ ...(gatesA.has(gate) ? [personName(personA)] : []), ...(gatesB.has(gate) ? [personName(personB)] : []) ],
-          transitPlanets: transitGates.has(gate) ? transitPlanetNames(gate) : ''
+          transitPlanets: transitGateSet.has(gate) ? transitPlanetNames(gate) : ''
         })),
         expectedThrough
       }];
