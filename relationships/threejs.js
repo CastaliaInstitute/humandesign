@@ -117,6 +117,7 @@ let readingMode = 'family';
 let readingViewKey = '';
 const generatedReadings = new Map();
 const flowAnimations = [];
+const centerParticleAnimations = [];
 const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 let channelFlowEnabled = true;
 let autoRotate = !reduceMotion;
@@ -795,6 +796,7 @@ document.querySelector('#toggleChannelFlow')?.addEventListener('click', event =>
   button.setAttribute('aria-pressed', String(channelFlowEnabled));
   button.textContent = `Flow · ${channelFlowEnabled ? 'On' : 'Off'}`;
   for (const flow of flowAnimations) flow.bead.visible = channelFlowEnabled;
+  for (const particle of centerParticleAnimations) particle.bead.visible = channelFlowEnabled;
 });
 document.querySelector('#generateFamilyReading')?.addEventListener('click', async event => {
   const button = event.currentTarget;
@@ -964,6 +966,101 @@ function addFlowMotion(target, curve, color, hover = null, reverse = false, size
       duration: THREE.MathUtils.clamp(length / speed, 0.9, 5.5)
     });
   }
+}
+function pointInPolygon(x, y, polygon) {
+  let inside = false;
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+    const a = polygon[i], b = polygon[j];
+    if ((a.y > y) !== (b.y > y) && x < (b.x - a.x) * (y - a.y) / (b.y - a.y) + a.x) inside = !inside;
+  }
+  return inside;
+}
+function randomPointInPolygon(polygon) {
+  const bounds = polygon.reduce((box, point) => ({
+    minX: Math.min(box.minX, point.x), minY: Math.min(box.minY, point.y),
+    maxX: Math.max(box.maxX, point.x), maxY: Math.max(box.maxY, point.y)
+  }), { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity });
+  for (let attempt = 0; attempt < 48; attempt++) {
+    const x = THREE.MathUtils.lerp(bounds.minX, bounds.maxX, Math.random());
+    const y = THREE.MathUtils.lerp(bounds.minY, bounds.maxY, Math.random());
+    if (pointInPolygon(x, y, polygon)) return new THREE.Vector2(x, y);
+  }
+  return polygon.reduce((sum, point) => sum.add(point), new THREE.Vector2()).multiplyScalar(1 / polygon.length);
+}
+function seedCenterParticle(particle) {
+  particle.container.attach(particle.bead);
+  const point = randomPointInPolygon(particle.polygon);
+  particle.bead.position.set(point.x, point.y, 5.2);
+  const angle = Math.random() * Math.PI * 2;
+  const speed = 2.6 + Math.random() * 3.8;
+  particle.velocity.set(Math.cos(angle) * speed, Math.sin(angle) * speed, 0);
+  particle.state = 'plane';
+  particle.age = 0;
+  particle.escapeAt = 2.2 + Math.random() * 5.5;
+}
+function addCenterParticleAnimations(group, paths) {
+  for (const path of paths) {
+    const node = path.userData?.node;
+    if (!node?.getAttribute('class')?.split(/\s+/).includes('center-shape')) continue;
+    const center = node.closest('.center');
+    const shape = path.toShapes(true)[0];
+    if (!center || !shape) continue;
+    const polygon = shape.getPoints(32);
+    if (polygon.length < 3) continue;
+    const centerId = center.getAttribute('data-center') || 'center';
+    const color = node.getAttribute('data-base-fill')
+      || node.style?.getPropertyValue('--chakra-color') || '#8bd8ff';
+    const count = centerId === 'sacral' ? 4 : center.getAttribute('data-defined') === 'true' ? 2 : 1;
+    for (let index = 0; index < count; index++) {
+      const bead = new THREE.Group();
+      const tint = new THREE.Color(color);
+      const glowMaterial = new THREE.MeshBasicMaterial({ color: tint, transparent: true, opacity: 0.42, depthWrite: false, toneMapped: false });
+      const coreMaterial = new THREE.MeshBasicMaterial({ color: tint.clone().lerp(new THREE.Color('#fffdf2'), 0.64), toneMapped: false });
+      const glow = new THREE.Mesh(new THREE.SphereGeometry(1.7, 8, 6), glowMaterial);
+      const core = new THREE.Mesh(new THREE.SphereGeometry(0.66, 8, 6), coreMaterial);
+      glow.renderOrder = 5;
+      core.renderOrder = 6;
+      bead.add(glow, core);
+      bead.userData.centerParticle = true;
+      group.add(bead);
+      const particle = {
+        bead, glow, glowMaterial, container: group,
+        polygon: polygon.map(point => point.clone()), velocity: new THREE.Vector3(),
+        state: 'plane', age: 0, escapeAt: 0, escapeVelocity: null,
+        escapeDuration: 1.2 + Math.random() * 1.2
+      };
+      centerParticleAnimations.push(particle);
+      seedCenterParticle(particle);
+      bead.visible = channelFlowEnabled;
+    }
+  }
+}
+function clearCenterParticleAnimations() {
+  for (const particle of centerParticleAnimations) {
+    particle.bead.removeFromParent();
+    particle.bead.traverse(object => {
+      object.geometry?.dispose();
+      if (object.material) (Array.isArray(object.material) ? object.material : [object.material]).forEach(material => material.dispose());
+    });
+  }
+  centerParticleAnimations.length = 0;
+}
+function releaseCenterParticleInto3D(particle) {
+  const parent = particle.bead.parent;
+  if (!parent) return;
+  const worldPosition = particle.bead.getWorldPosition(new THREE.Vector3());
+  const rotation = parent.getWorldQuaternion(new THREE.Quaternion());
+  const normal = new THREE.Vector3(0, 0, Math.random() < 0.5 ? -1 : 1).applyQuaternion(rotation).normalize();
+  const tangent = particle.velocity.clone().applyQuaternion(rotation).normalize();
+  const lateral = new THREE.Vector3(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).normalize();
+  particle.escapeVelocity = normal.multiplyScalar(9 + Math.random() * 8)
+    .addScaledVector(tangent, 3 + Math.random() * 4)
+    .addScaledVector(lateral, 2 + Math.random() * 2);
+  scene.attach(particle.bead);
+  particle.bead.position.copy(worldPosition);
+  particle.state = 'escaped';
+  particle.age = 0;
+  particle.escapeDuration = 1.2 + Math.random() * 1.2;
 }
 function releaseParticleInto3D(flow) {
   const parent = flow.bead.parent;
@@ -1365,6 +1462,7 @@ function makePlaneGroup(paths, person, sharedChannels, relationshipChannels, opt
       }
     }
   }
+  addCenterParticleAnimations(group, paths);
   // The embedded SVG is the visual source of truth. Keep the traced Three.js
   // geometry as invisible raycast targets for existing chart interactions.
   group.traverse(object => {
@@ -1726,6 +1824,7 @@ function rebuildRelationship() {
     setStatus('Calculating parent natal charts…');
     return;
   }
+  clearCenterParticleAnimations();
   flowAnimations.length = 0;
   const danielGates = parseGateList('#danielGates');
   const camilleGates = parseGateList('#camilleGates');
@@ -2448,6 +2547,48 @@ function animate() {
     const pulse = 0.76 + 0.24 * Math.sin(elapsed * 5.2 + flow.phase * Math.PI * 2);
     flow.glow.scale.setScalar(pulse);
     flow.glowMaterial.opacity = 0.24 + pulse * 0.22;
+  }
+  for (const particle of centerParticleAnimations) {
+    particle.bead.visible = channelFlowEnabled && particle.container.visible;
+    if (!channelFlowEnabled) continue;
+    if (particle.state === 'plane') {
+      const position = particle.bead.position;
+      const nextX = position.x + particle.velocity.x * delta;
+      const nextY = position.y + particle.velocity.y * delta;
+      if (pointInPolygon(nextX, nextY, particle.polygon)) {
+        position.x = nextX;
+        position.y = nextY;
+      } else {
+        const centroid = particle.polygon.reduce((sum, point) => sum.add(point), new THREE.Vector2()).multiplyScalar(1 / particle.polygon.length);
+        const inward = new THREE.Vector2(centroid.x - position.x, centroid.y - position.y).normalize();
+        particle.velocity.set(inward.x * (3 + Math.random() * 3), inward.y * (3 + Math.random() * 3), 0);
+        const bounceX = position.x + particle.velocity.x * delta;
+        const bounceY = position.y + particle.velocity.y * delta;
+        if (pointInPolygon(bounceX, bounceY, particle.polygon)) {
+          position.x = bounceX;
+          position.y = bounceY;
+        } else {
+          const point = randomPointInPolygon(particle.polygon);
+          position.x = point.x;
+          position.y = point.y;
+        }
+      }
+      particle.age += delta;
+      if (particle.age >= particle.escapeAt) releaseCenterParticleInto3D(particle);
+    } else {
+      particle.age += delta;
+      const velocity = particle.escapeVelocity;
+      const position = particle.bead.position;
+      const swirl = new THREE.Vector3(-position.z, 0, position.x).normalize();
+      velocity.addScaledVector(swirl, delta * 2.4);
+      velocity.y -= delta * 0.35;
+      velocity.multiplyScalar(Math.pow(0.95, delta));
+      position.addScaledVector(velocity, delta);
+      if (particle.age >= particle.escapeDuration) seedCenterParticle(particle);
+    }
+    const pulse = 0.74 + 0.26 * Math.sin(elapsed * 4.6 + particle.age * 1.2);
+    particle.glow.scale.setScalar(pulse);
+    particle.glowMaterial.opacity = 0.2 + pulse * 0.25;
   }
   renderer.render(scene, camera);
   requestAnimationFrame(animate);
