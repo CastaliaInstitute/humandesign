@@ -4,6 +4,7 @@ import { generatePublicDemoReading } from './public-demo-readings.js?v=lifetime-
 import { publicPairRecurrence, publicFamilyRecurrence } from './relationship-recurrence-data.js?v=family-opportunities-20261020';
 import { relationshipChannelReadings } from './channel-guide.js?v=metheus-reading-20261020';
 import { buildPenta } from './penta.js?v=family-penta-20261020';
+import { interpretiveQuestions } from './interpretive-questions.js?v=family-inquiry-bank-20261022';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { SVGLoader } from 'three/addons/loaders/SVGLoader.js';
 
@@ -1373,7 +1374,23 @@ function offsetPathPoints(points, amount) {
     return { x: point.x - dy / length * amount, y: point.y + dx / length * amount };
   });
 }
-function hoverInfo(key, title, detail) { return { hoverKey: key, hoverTip: { title, detail } }; }
+function inquiryContext(key, title) {
+  const gate = key.match(/(?:^|:)gate:(\d+)$/);
+  if (gate) return { kind: 'gate', label: title };
+  const channel = key.match(/(?:^|:)channel:(\d+)[–-](\d+)$/);
+  if (channel) return { kind: 'channel', label: title };
+  const center = key.match(/(?:^|:)center:([^:]+)$/);
+  if (center) {
+    const entry = Object.entries(centerDescriptions).find(([, [label]]) => label.toLocaleLowerCase() === center[1].toLocaleLowerCase());
+    return entry ? { kind: 'center', label: entry[1][0] } : null;
+  }
+  return null;
+}
+function hoverInfo(key, title, detail) {
+  const feature = inquiryContext(key, title);
+  const questions = feature ? interpretiveQuestions(feature.kind, feature.label) : [];
+  return { hoverKey: key, hoverTip: { title, detail, questions } };
+}
 function activationDescription(activations = []) {
   if (!activations.length) return '';
   return ['personality', 'design'].map(type => {
@@ -2537,14 +2554,26 @@ function clearHover() {
   canvas.style.cursor = 'grab';
   applyHighlight(selectedKey);
 }
+function renderTip(info) {
+  tip.replaceChildren();
+  const title = document.createElement('strong');
+  title.textContent = info.title;
+  const detail = document.createElement('span');
+  detail.textContent = info.detail;
+  tip.append(title, detail);
+  for (const prompt of info.questions || []) {
+    const line = document.createElement('span');
+    line.className = 'tip-question';
+    line.textContent = `${prompt.audience} prompt: ${prompt.text}`;
+    tip.append(line);
+  }
+}
 function setHover(info, key) {
   if (key !== hoveredKey) {
     hoveredKey = key;
     if (!selectedKey) applyHighlight(key);
   }
-  tip.innerHTML = `<strong></strong><span></span>`;
-  tip.querySelector('strong').textContent = info.title;
-  tip.querySelector('span').textContent = info.detail;
+  renderTip(info);
   tip.hidden = false;
   canvas.style.cursor = 'help';
 }
@@ -2553,9 +2582,7 @@ function selectFeature(info, key, clientX, clientY) {
   hoveredKey = selectedKey;
   applyHighlight(selectedKey);
   if (selectedKey) {
-    tip.innerHTML = `<strong></strong><span></span>`;
-    tip.querySelector('strong').textContent = info.title;
-    tip.querySelector('span').textContent = info.detail;
+    renderTip(info);
     tip.hidden = false;
     canvas.style.cursor = 'help';
     positionTip(clientX, clientY);
