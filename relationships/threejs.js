@@ -2456,7 +2456,9 @@ function fitCameraToFamily(rect = canvas.getBoundingClientRect()) {
   for (const person of persons) {
     for (const point of [
       { x: 180 - halfWidth, y: 0 }, { x: 180 + halfWidth, y: 0 },
-      { x: 180 - halfWidth, y: chartViewHeight }, { x: 180 + halfWidth, y: chartViewHeight }
+      // Include the root edge and the name tags below the SVG viewBox; the
+      // overlap test already accounts for this 34-unit lower extension.
+      { x: 180 - halfWidth, y: chartViewHeight + 34 }, { x: 180 + halfWidth, y: chartViewHeight + 34 }
     ]) {
       const world = chartRoot.localToWorld(chartPointInFamily(point, person));
       const relative = world.sub(controls.target);
