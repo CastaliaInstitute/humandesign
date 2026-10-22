@@ -122,6 +122,44 @@
 <g id="gate-54" class="gate" data-state="open" data-gate="54" data-center="root" transform="translate(168.57142857142858 0) scale(0.7142857 1) translate(-168.57142857142858 0)" tabindex="0" role="button" aria-label="Ambition: drive toward advancement and transformation. Unactivated in this chart; open to outside influence." data-reading="drive toward advancement and transformation"><circle class="gate-hit" cx="168.57142857142858" cy="322.06666666666666" r="6"/><circle class="gate-marker" cx="168.57142857142858" cy="322.06666666666666" r="1"/><text class="gate-number" x="168.57142857142858" y="322.06666666666666">54</text></g>
 </g></g><g id="svg-tooltip" class="svg-tooltip" aria-hidden="true"><rect/><text/></g><script href="transit-data.js?family-circle-108-20261019"></script><script><![CDATA[(function(){
 const svg=document.currentScript.ownerSVGElement;
+// Select a saved public example with ?chart=camille (or ?person=camille).
+// The SVG can also be embedded elsewhere; in that case the parent URL applies.
+function applyChartParameter(){
+ const params=new URLSearchParams(location.search),parentParams=(()=>{try{return new URLSearchParams(parent.location.search);}catch{return new URLSearchParams();}})();
+ const requested=(params.get('chart')||params.get('person')||parentParams.get('chart')||parentParams.get('person')||'').trim().toLowerCase();
+ if(!requested)return;
+ const examples={
+  camille:[4,5,7,9,10,11,12,15,21,25,26,28,29,34,35,45,46,50,64],
+  daniel:[1,2,3,7,8,10,12,13,16,19,31,34,36,41,43,46,48,51,56,57,58,60],
+  aleia:[1,2,4,6,7,8,13,16,22,23,25,31,36,41,42,45,53],
+  finn:[3,19,23,24,25,27,32,33,36,37,38,41,44,51,57,60,61,63]
+ };
+ const gates=examples[requested];
+  if(!gates){svg.setAttribute('aria-label',`Human Design BodyGraph template. Unknown chart: ${requested}.`);return;}
+ const active=new Set(gates);
+ svg.querySelectorAll('.gate').forEach(gate=>{
+  const on=active.has(Number(gate.dataset.gate));
+  gate.dataset.state=on?'closed':'open';
+  gate.removeAttribute('data-activation');
+  if(on)gate.setAttribute('data-activation','chart');
+  const base=(gate.dataset.reading||gate.getAttribute('aria-label')||'').split(/(?: Activated in your natal chart| Unactivated in this chart| Unactivated in your chart)/)[0];
+  gate.setAttribute('aria-label',`${base}${on?' Activated in the '+requested+' example chart.':' Unactivated in the '+requested+' example chart.'}`);
+ });
+ svg.querySelectorAll('.channel-group').forEach(channel=>{
+  const defined=active.has(Number(channel.dataset.from))&&active.has(Number(channel.dataset.to));
+  channel.dataset.defined=String(defined);
+  channel.setAttribute('aria-label',defined?'Defined channel in this chart.':'Incomplete channel in this chart.');
+ });
+ svg.querySelectorAll('.center').forEach(center=>{
+  const connected=Array.from(svg.querySelectorAll('.channel-group')).some(channel=>channel.dataset.defined==='true'&&(svg.getElementById('gate-'+channel.dataset.from)?.dataset.center===center.dataset.center||svg.getElementById('gate-'+channel.dataset.to)?.dataset.center===center.dataset.center));
+  center.dataset.defined=String(connected);
+  center.setAttribute('aria-label',`${center.dataset.center} center — ${connected?'Defined':'Undefined'} in the ${requested} example chart.`);
+ });
+ svg.setAttribute('aria-label',`Human Design BodyGraph for ${requested}`);
+  const displayName=requested==='finn'?'Finn':requested==='aleia'?'Aleia':requested[0].toUpperCase()+requested.slice(1);
+  svg.querySelector('#title')?.replaceChildren(document.createTextNode(`Human Design BodyGraph · ${displayName}`));
+ svg.querySelector('#desc')?.replaceChildren(document.createTextNode(`Interactive Human Design BodyGraph for the public ${requested} example chart.`));
+}
 const interactive='.gate, .channel-group, .center';
 const flowControl=svg.getElementById('flow-control'),gateDemoControl=svg.getElementById('gate-demo-control');
 const tooltip=svg.getElementById('svg-tooltip');
@@ -195,6 +233,7 @@ function setLaneGeometry(){
 }
 function spreadCentersVertically(){const centers=Array.from(svg.querySelectorAll('.center')),topCenter=centers.find(center=>center.dataset.center==='head'),topTransform=topCenter?.getAttribute('transform')||'',topY=Number(topTransform.match(/translate\([^\s]+\s+(-?[\d.]+)/)?.[1]||0);centers.forEach(center=>{const transform=center.getAttribute('transform')||'',base=center.dataset.baseTransform||transform,match=base.match(/translate\([^\s]+\s+(-?[\d.]+)/),centerY=Number(match?.[1]||topY),offset=(centerY-topY)*.18;center.dataset.baseTransform=base;center.setAttribute('transform',`translate(0 ${offset.toFixed(3)}) ${base}`);});}
 spreadCentersVertically();
+applyChartParameter();
 positionGatesOnCenterBorders();
 setLaneGeometry();
 straightenAllChannels();

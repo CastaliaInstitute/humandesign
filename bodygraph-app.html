@@ -18,6 +18,11 @@
   </style>
 </head>
 <body>
-  <iframe src="/bodygraph.svg" title="Interactive Human Design BodyGraph"></iframe>
+  <iframe id="bodygraph" title="Interactive Human Design BodyGraph"></iframe>
+  <script>
+    const params = new URLSearchParams(location.search);
+    const chart = params.get('chart') || params.get('person');
+    document.querySelector('#bodygraph').src = '/bodygraph.svg' + (chart ? '?chart=' + encodeURIComponent(chart) : '');
+  </script>
 </body>
 </html>
