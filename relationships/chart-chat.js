@@ -1,6 +1,7 @@
 import { publicPairRecurrence, publicFamilyRecurrence } from './relationship-recurrence-data.js?v=family-opportunities-20261020';
 import { relationshipChannelReadings } from './channel-guide.js?v=metheus-reading-20261020';
 import { buildPenta } from './penta.js?v=family-penta-20261020';
+import { deriveChartStructure, deriveRelationshipStructure, deriveBridgeChannels, deriveAllFamilyRelationships, validateFamilyDerivations } from './chart-analysis.mjs?v=family-analysis-20261022';
 
 const config = window.castaliaConfig || {};
 const launcher = document.querySelector('#chartChatLauncher');
@@ -23,7 +24,7 @@ const readingInstruction = `You are the Castalia Astrolabe Metheus reader. Use H
 
 PLAIN-LANGUAGE READING: The user should experience a thoughtful conversation about life, not a Human Design lesson. Do not focus on, explain, or name Human Design, gates, hanging gates, channels, centers, definition, bridges, Penta, types, authorities, profiles, or chart mechanics in the reading or questions. Do not recite chart inventories or use specialized vocabulary. Translate relevant chart patterns into tentative, ordinary-life reflections. Make clear what comes from the user’s account and do not present chart-derived suggestions as known facts about them. If chart data does not support a grounded, useful reflection, leave it out. Ask normal, open, specific questions that invite the person to check a reflection against experience; never ask them to identify with a chart concept. Follow-up questions should sound natural without mentioning their chart inspiration. Prefer one useful question at a time. Keep readings and questions warm, concise, non-prescriptive, and centered on the person’s actual life.
 
-FACTUAL DISCIPLINE: The supplied JSON is the authority for chart facts. Gate ownership is explicitly represented in gateContributions / contributions and chart natalGates. Never infer ownership from gate order, channel order, color, gender, or a previous answer. Use gate and channel names only from the supplied guide. Channel circuit labels and groups are fixed reference metadata supplied from the bodygraph; use them only when relevant, do not reclassify channels, and do not present circuit symbolism as a proven cause or personality fact. Distinguish (1) a channel defined within one person’s natal chart, (2) a cross-chart natal bridge completed by one gate from each person, and (3) a temporary transit-assisted completion. Do not call a personal natal channel a relationship bridge. A gate activation is not itself a defined channel. Individual defined centers, centers defined by a pair together, transit-defined centers, undefined centers with an activated gate, and fully open centers with no activated gate are different facts; preserve the supplied distinctions. Do not upgrade a gate-only activation into a channel or center definition.
+FACTUAL DISCIPLINE: The supplied JSON is the authority for chart facts. Gate ownership is explicitly represented in gateContributions / contributions and chart natalGates. Never infer ownership from gate order, channel order, color, gender, or a previous answer. Use gate and channel names only from the supplied guide. Channel circuit labels and groups are fixed reference metadata supplied from the bodygraph; use them only when relevant, do not reclassify channels, and do not present circuit symbolism as a proven cause or personality fact. Distinguish (1) a channel defined within one person’s natal chart, (2) a cross-chart natal bridge completed by one gate from each person, and (3) a temporary transit-assisted completion. Do not call a personal natal channel a relationship bridge. A gate activation is not itself a defined channel. Individual defined centers, centers defined by a pair together, transit-defined centers, undefined centers with an activated gate, and fully open centers with no activated gate are different facts; preserve the supplied distinctions. Do not upgrade a gate-only activation into a channel or center definition. For family questions, familyMembers lists all charts with calculable natal data and familyConnections covers every unique pair in that roster; check familyConnectionCount. knownProfilesWithoutNatalData lists source family members lacking required birth inputs, who therefore have no chart-derived facts or pair entries. Do not invent or imply coverage for them.
 
 PENTA METHOD: When supplied Penta facts are relevant, read them as a group framework for 3–5 people, distinct from individual charts and pair relationships. Use only the supplied Penta gates, gate owners, and six channels. Explain whether a channel is complete at group level and whether both gates come from one natal chart or are distributed across members. Do not call it an individual defined channel, assign fixed roles, infer causality, or predict outcomes. Penta summaries are natal-only unless transit facts are explicitly supplied.
 
@@ -68,8 +69,8 @@ function updateAuthUI() {
   loginText.textContent = signedIn
     ? ''
     : window.hdUsingPublicExample
-      ? 'Generate a reading for the public family example. Sign in with Castalia to ask follow-up questions.'
-      : 'Sign in with Castalia to get a reading and ask questions about the charts.';
+      ? 'Generate a reading for the public family example. Sign in with Google to ask follow-up questions; connect GitHub to load family profiles.'
+      : 'Sign in with Google to ask questions about the public example. Connect GitHub to load family profiles.';
 }
 
 function parseGates(selector) {
@@ -198,81 +199,11 @@ function lifetimeScanSubjects(question, familyCharts) {
 }
 
 function chartStructure(natalGates, definitions) {
-  const channels = definitions.filter(({ from, to }) => natalGates.has(from) && natalGates.has(to));
-  const channelsByCircuit = new Map();
-  for (const channel of channels) {
-    const key = channel.circuit || 'unclassified';
-    if (!channelsByCircuit.has(key)) channelsByCircuit.set(key, {
-      circuit: key,
-      name: channel.circuitName,
-      group: channel.circuitGroup,
-      type: channel.circuitType,
-      channelCount: 0,
-      channels: []
-    });
-    const group = channelsByCircuit.get(key);
-    group.channelCount++;
-    group.channels.push(channel.id);
-  }
-  const defined = new Set(channels.flatMap(({ from, to }) => [gateMetadata.get(from)?.center, gateMetadata.get(to)?.center]).filter(Boolean));
-  const centers = ['head', 'ajna', 'throat', 'g', 'ego', 'spleen', 'solar', 'sacral', 'root'];
-  const activated = new Set([...natalGates].map(gate => gateMetadata.get(gate)?.center).filter(Boolean));
-  return {
-    definedCenters: centers.filter(center => defined.has(center)),
-    undefinedCenters: centers.filter(center => !defined.has(center) && activated.has(center)),
-    fullyOpenCenters: centers.filter(center => !defined.has(center) && !activated.has(center)),
-    natalGateDetails: [...natalGates].sort((a, b) => a - b).map(gate => ({
-      gate,
-      name: gateMetadata.get(gate)?.name || '',
-      description: gateMetadata.get(gate)?.description || '',
-      center: gateMetadata.get(gate)?.center || ''
-    })),
-    natalChannels: channels.map(({ id, from, to }) => ({
-      channel: id,
-      name: relationshipChannelReadings[id]?.name || '',
-      description: relationshipChannelReadings[id]?.description || '',
-      circuit: channels.find(channel => channel.id === id)?.circuit || '',
-      circuitName: channels.find(channel => channel.id === id)?.circuitName || '',
-      circuitGroup: channels.find(channel => channel.id === id)?.circuitGroup || '',
-      circuitType: channels.find(channel => channel.id === id)?.circuitType || '',
-      gates: [from, to].map(gate => ({ gate, name: gateMetadata.get(gate)?.name || '' }))
-    })),
-    natalCircuitSummary: [...channelsByCircuit.values()]
-  };
+  return deriveChartStructure(natalGates, definitions, gateMetadata, relationshipChannelReadings);
 }
 
 function relationshipStructure(first, second, definitions, transitGates = new Set()) {
-  const firstStructure = chartStructure(first.natalGates, definitions);
-  const secondStructure = chartStructure(second.natalGates, definitions);
-  const firstCenters = new Set(firstStructure.definedCenters);
-  const secondCenters = new Set(secondStructure.definedCenters);
-  const pairGates = new Set([...first.natalGates, ...second.natalGates]);
-  const pairCenters = new Set(chartStructure(pairGates, definitions).definedCenters);
-  const withTransitCenters = new Set(chartStructure(new Set([...pairGates, ...transitGates]), definitions).definedCenters);
-  const centers = ['head', 'ajna', 'throat', 'g', 'ego', 'spleen', 'solar', 'sacral', 'root'];
-  const relationshipType = first.role === 'parent' && second.role === 'parent' ? 'parent-parent' :
-    first.role === 'child' && second.role === 'child' ? 'child-child' : 'parent-child';
-  return {
-    relationshipType,
-    ...(relationshipType === 'parent-child' ? {
-      parent: first.role === 'parent' ? first.name : second.name,
-      child: first.role === 'child' ? first.name : second.name
-    } : {}),
-    centerDynamics: centers.map(center => ({
-      center,
-      firstDefined: firstCenters.has(center),
-      secondDefined: secondCenters.has(center),
-      definedInPair: pairCenters.has(center),
-      definedWithTransit: withTransitCenters.has(center),
-      firstState: firstCenters.has(center) ? 'defined' : firstStructure.undefinedCenters.includes(center) ? 'undefined with an activated gate' : 'fully open with no activated gate',
-      secondState: secondCenters.has(center) ? 'defined' : secondStructure.undefinedCenters.includes(center) ? 'undefined with an activated gate' : 'fully open with no activated gate',
-      relationship: firstCenters.has(center) && secondCenters.has(center) ? 'defined by both' :
-        firstCenters.has(center) ? `${first.name} defined; ${second.name} undefined or fully open` :
-          secondCenters.has(center) ? `${second.name} defined; ${first.name} undefined or fully open` :
-            pairCenters.has(center) ? 'defined only by the pair' : 'undefined in both and in the pair'
-    })),
-    transitDefinedCenters: centers.filter(center => withTransitCenters.has(center) && !pairCenters.has(center))
-  };
+  return deriveRelationshipStructure(first, second, definitions, gateMetadata, transitGates);
 }
 
 function activeChannels(definitions, natalGates, transitGates, transitLabel = 'current transit') {
@@ -324,49 +255,7 @@ function transitChannelChanges(definitions, natalGates, snapshot, durationByPlan
 }
 
 function bridgesBetween(definitions, first, second, transitGates, snapshot, durationByPlanet) {
-  const firstActive = new Set([...first.natalGates, ...transitGates]);
-  const secondActive = new Set([...second.natalGates, ...transitGates]);
-  const gateContributors = gate => [
-    ...(first.natalGates.has(gate) ? [`${first.name} natal`] : []),
-    ...(second.natalGates.has(gate) ? [`${second.name} natal`] : []),
-    ...(transitGates.has(gate) ? ['transit'] : [])
-  ];
-  return definitions.filter(({ from, to }) => {
-    if ((first.natalGates.has(from) && first.natalGates.has(to)) || (second.natalGates.has(from) && second.natalGates.has(to))) return false;
-    return (firstActive.has(from) && secondActive.has(to) && (first.natalGates.has(from) || second.natalGates.has(to))) ||
-      (secondActive.has(from) && firstActive.has(to) && (second.natalGates.has(from) || first.natalGates.has(to)));
-  }).map(({ id, from, to, reading }) => {
-    const contributedGates = [from, to].filter(gate => transitGates.has(gate) && !first.natalGates.has(gate) && !second.natalGates.has(gate));
-    const planets = [...new Set(contributedGates.flatMap(gate => snapshot.gatePlanets[gate] || []))];
-    const exits = planets.map(planet => durationByPlanet[planet]?.nextGateExit).filter(Boolean).map(value => new Date(value).getTime());
-    const endsAt = exits.length ? Math.min(...exits) : null;
-    const remainingMs = endsAt === null ? null : Math.max(0, endsAt - snapshot.epoch * 1000);
-    const hours = remainingMs === null ? null : Math.floor(remainingMs / 3600000);
-    return {
-      channel: id,
-      channelName: relationshipChannelReadings[id]?.name || '',
-      channelDescription: relationshipChannelReadings[id]?.description || '',
-      gates: `${from}–${to}`,
-      chartGuide: relationshipChannelReadings[id]?.description || reading,
-      connectionType: contributedGates.length ? 'transit-assisted relationship completion' : 'cross-chart natal bridge',
-      gateContributions: [from, to].map(gate => ({
-        gate,
-        name: gateMetadata.get(gate)?.name || '',
-        description: gateMetadata.get(gate)?.description || '',
-        natalOwners: gateContributors(gate),
-        transitPlanets: transitGates.has(gate) ? snapshot.gatePlanets[gate] || [] : []
-      })),
-      contributions: [from, to].map(gate => {
-        const owners = [...gateContributors(gate), ...(transitGates.has(gate) ? ['transit'] : [])];
-        return `Gate ${gate}${gateMetadata.get(gate)?.name ? ` (${gateMetadata.get(gate).name})` : ''}: ${owners.join(' + ') || 'no contribution'}`;
-      }),
-      transitContributed: contributedGates.length > 0,
-      transitGates: contributedGates.map(gate => ({ gate, planets: snapshot.gatePlanets[gate] || [] })),
-      expectedToStopCompletingAt: endsAt === null ? null : new Date(endsAt).toISOString(),
-      expectedToStopCompletingAtLocal: endsAt === null ? null : new Date(endsAt).toLocaleString(),
-      estimatedRemaining: hours === null ? 'end estimate unavailable' : hours >= 24 ? `about ${Math.floor(hours / 24)}d ${hours % 24}h` : `about ${Math.max(1, hours)}h`
-    };
-  });
+  return deriveBridgeChannels(definitions, first, second, transitGates, snapshot, durationByPlanet, gateMetadata, relationshipChannelReadings);
 }
 
 function remainingLabel(snapshotEpoch, exitsAt) {
@@ -432,11 +321,26 @@ async function buildChartContext(question = '', onProgress = () => {}) {
       circuitType: channel.circuitType
     }))
   };
+  const bodygraphReference = {
+    gates: [...gateMetadata.entries()].map(([gate, detail]) => ({ gate, ...detail })),
+    channels: definitions.map(channel => ({
+      channel: channel.id,
+      from: channel.from,
+      to: channel.to,
+      name: channel.guide?.name || '',
+      description: channel.guide?.description || channel.reading || '',
+      circuit: channel.circuit,
+      circuitName: channel.circuitName,
+      circuitGroup: channel.circuitGroup,
+      circuitType: channel.circuitType
+    }))
+  };
   const referenceSnapshot = referenceDate ? await transit.snapshotAt(referenceDate) : null;
   const danielGates = parseGates('#danielGates');
   const camilleGates = parseGates('#camilleGates');
   if (!danielGates.size || !camilleGates.size) throw new Error('The selected charts are still being calculated. Wait a moment and try again.');
   const transitGates = new Set(snapshot.gates);
+  const natalActivations = person => window.hdNatalPlanetaryActivations?.[person] || [];
   const durationByPlanet = Object.fromEntries(durations.map(item => [item.planet, {
     gate: item.gate,
     nextGateExit: item.exitsAt,
@@ -449,6 +353,7 @@ async function buildChartContext(question = '', onProgress = () => {}) {
       name: child.name || child.id || 'Child chart',
       role: 'child',
       birthEpoch: child.birthEpoch,
+      planetaryActivations: child.activations || [],
       natalGates: [...gates].sort((a, b) => a - b),
       currentlyActiveChannels: activeChannels(definitions, gates, transitGates, lifetimeTimeline ? 'transit at the selected time' : 'current transit'),
       ...chartStructure(gates, definitions),
@@ -459,6 +364,7 @@ async function buildChartContext(question = '', onProgress = () => {}) {
     blue: {
       name: window.hdChartNames?.daniel || document.querySelector('#chartNameA')?.textContent || 'Blue chart',
       role: 'parent',
+      planetaryActivations: natalActivations('daniel'),
       natalGates: [...danielGates].sort((a, b) => a - b),
       currentlyActiveChannels: activeChannels(definitions, danielGates, transitGates, lifetimeTimeline ? 'transit at the selected time' : 'current transit'),
       ...chartStructure(danielGates, definitions),
@@ -467,6 +373,7 @@ async function buildChartContext(question = '', onProgress = () => {}) {
     pink: {
       name: window.hdChartNames?.camille || document.querySelector('#chartNameB')?.textContent || 'Pink chart',
       role: 'parent',
+      planetaryActivations: natalActivations('camille'),
       natalGates: [...camilleGates].sort((a, b) => a - b),
       currentlyActiveChannels: activeChannels(definitions, camilleGates, transitGates, lifetimeTimeline ? 'transit at the selected time' : 'current transit'),
       ...chartStructure(camilleGates, definitions),
@@ -521,21 +428,28 @@ async function buildChartContext(question = '', onProgress = () => {}) {
       lifetimeChannelScan = { available: false, reason: error.message, results: [] };
     }
   }
-  const familyConnections = [];
-  for (let i = 0; i < familyCharts.length; i++) {
-    for (let j = i + 1; j < familyCharts.length; j++) {
-      const bridges = bridgesBetween(definitions, familyCharts[i], familyCharts[j], transitGates, snapshot, durationByPlanet);
-      familyConnections.push({
-        people: [familyCharts[i].name, familyCharts[j].name],
-        ...relationshipStructure(familyCharts[i], familyCharts[j], definitions, transitGates),
-        recurrence: publicPairRecurrence(
-          { charts: [familyCharts[i], familyCharts[j]] },
-          bridges.filter(bridge => bridge.transitContributed).map(bridge => bridge.channel)
-        ),
-        channels: bridges
-      });
-    }
-  }
+  const familyConnections = deriveAllFamilyRelationships(familyCharts, (first, second) => {
+    const bridges = bridgesBetween(definitions, first, second, transitGates, snapshot, durationByPlanet);
+    return {
+      ids: [first.id, second.id],
+      people: [first.name, second.name],
+      ...relationshipStructure(first, second, definitions, transitGates),
+      recurrence: publicPairRecurrence(
+        { charts: [first, second] },
+        bridges.filter(bridge => bridge.transitContributed).map(bridge => bridge.channel)
+      ),
+      channels: bridges
+    };
+  });
+  const analysisValidation = validateFamilyDerivations({
+    gates: bodygraphReference.gates,
+    channels: bodygraphReference.channels,
+    members: familyCharts,
+    connections: familyConnections,
+    chartStructures: Object.fromEntries(familyCharts.map(chart => [chart.id, chartStructure(chart.natalGates, definitions)])),
+    transitGates
+  });
+  if (!analysisValidation.valid) throw new Error(`BodyGraph family analysis failed validation: ${analysisValidation.issues.join(' ')}`);
   let comparison = null;
   if (referenceSnapshot) {
     const referenceTransitGates = new Set(referenceSnapshot.gates);
@@ -588,6 +502,16 @@ async function buildChartContext(question = '', onProgress = () => {}) {
     lifetimeTimeline,
     timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
     ephemeris: `${snapshot.source}; ${snapshot.sampleStepSeconds / 60}-minute samples; tropical ecliptic`,
+    bodygraphReference,
+    knownProfilesWithoutNatalData: window.hdRelationshipProfilesWithoutNatalData || [],
+    familyMembers: familyCharts.map(chart => ({
+      id: chart.id,
+      name: chart.name,
+      role: chart.role,
+      natalGates: [...chart.natalGates].sort((a, b) => a - b)
+    })),
+    familyConnectionCount: familyConnections.length,
+    analysisValidation,
     transitGateActivations: Object.entries(snapshot.gatePlanets).map(([gate, planets]) => ({
       gate: Number(gate), planets: planets.map(planet => ({
         name: planet,
@@ -611,6 +535,7 @@ async function buildChartContext(question = '', onProgress = () => {}) {
 
 async function waitForNatalProfiles() {
   const deadline = Date.now() + 45000;
+  if (window.hdUsingPublicExample && window.hdExampleNatalProfilesReady) return;
   if (signedIn) {
     while (!window.hdNatalProfilesReady && Date.now() < deadline) {
       if (window.hdNatalProfilesError) throw new Error(`The signed-in natal charts could not be loaded: ${window.hdNatalProfilesError}`);
@@ -619,14 +544,14 @@ async function waitForNatalProfiles() {
     if (!window.hdNatalProfilesReady) throw new Error('The signed-in natal charts are still loading. Wait a moment and try again.');
     return;
   }
-  if (!window.hdUsingPublicExample) throw new Error('Sign in with Castalia to get a reading for your selected charts.');
+  if (!window.hdUsingPublicExample) throw new Error('Sign in with Google and connect GitHub to load your family charts.');
   while (!window.hdExampleNatalProfilesReady && Date.now() < deadline) {
     await new Promise(resolve => window.setTimeout(resolve, 250));
   }
   if (!window.hdExampleNatalProfilesReady) throw new Error('The example charts are still being calculated. Wait a moment and try again.');
 }
 
-const familyInterpretationGuidance = `WHOLE-FAMILY METHOD: Read the household as a system, not as a stack of separate individual readings. Use familyConnections as the full pairwise evidence map and penta only as a group-level lens when eligible. A pattern found in one pair belongs to that relationship; call it a family-wide pattern only when it recurs across relationships or is supported by the group-level facts. Distinguish the adults’ relationship, each caregiving relationship, and sibling relationships when the data supports them. Do not imply that children are responsible for adult wellbeing, household leadership, or sibling care. Prioritize the few relationships that best explain the shared pattern; do not mechanically cover every pair just because pair data is available. Start with the clearest shared pattern, use one or two specific relationship examples to show how it differs across the family, and end with one practical, low-pressure reflection. If no lived context was reported, do not invent one. Keep the account tentative, specific, and in ordinary language. Do not name Human Design, gates, channels, centers, Penta, or chart mechanics in the reading; translate relevant facts into tentative everyday observations.`;
+const familyInterpretationGuidance = `WHOLE-FAMILY METHOD: Read the household as a system, not as a stack of separate individual readings. familyMembers is the complete roster with calculable natal charts; familyConnections contains every unique pair from that roster, and familyConnectionCount states the expected total. knownProfilesWithoutNatalData lists named source profiles whose natal inputs were incomplete, so they have no chart or pairwise derivations; never invent those facts or imply pair coverage for them. Use familyConnections as the full pairwise evidence map and penta only as a group-level lens when eligible. A pattern found in one pair belongs to that relationship; call it a family-wide pattern only when it recurs across relationships or is supported by the group-level facts. Distinguish the adults’ relationship, each caregiving relationship, and sibling relationships when the data supports them. Do not imply that children are responsible for adult wellbeing, household leadership, or sibling care. Prioritize the few relationships that best explain the shared pattern; do not mechanically cover every pair just because pair data is available. Start with the clearest shared pattern, use one or two specific relationship examples to show how it differs across the family, and end with one practical, low-pressure reflection. If no lived context was reported, do not invent one. Keep the account tentative, specific, and in ordinary language. Do not name Human Design, gates, channels, centers, Penta, or chart mechanics in the reading; translate relevant facts into tentative everyday observations.`;
 
 function composeUserMessage(question, context, firstReading) {
   const prior = conversation.filter(turn => turn.role === 'user').slice(-6).map(turn => `User-reported context/question (not a chart fact): ${turn.text}`).join('\n');
@@ -713,7 +638,7 @@ async function requestReading(question, firstReading = false) {
 
 async function generateFrontViewReading(view) {
   const publicExampleReading = !signedIn && window.hdUsingPublicExample;
-  if (!signedIn && !publicExampleReading) throw new Error('Sign in with Castalia to generate readings for your selected charts.');
+  if (!signedIn && !publicExampleReading) throw new Error('Sign in with Google to generate readings for the public example, or connect GitHub to load your family charts.');
   if (!config.supabaseUrl || !config.supabaseAnonKey) throw new Error('Castalia AI reading is not configured on this deployment.');
   const token = signedIn ? await window.CastaliaHumanDesignAuth?.getAccessToken() : config.supabaseAnonKey;
   if (!token) throw new Error('Your Castalia session expired. Sign in again to continue.');
@@ -787,7 +712,7 @@ if (urlQuestion) {
   firstReadingStarted = true;
   questionBox.value = urlQuestion.slice(0, Number(questionBox.maxLength) || 1000);
   setOpen(true);
-  if (!signedIn) loginText.textContent = 'Sign in with Castalia to submit the question from this link.';
+  if (!signedIn) loginText.textContent = 'Sign in with Google to ask about the public example; connect GitHub to load your family charts.';
 }
 const authApi = window.CastaliaHumanDesignAuth;
 if (authApi) {

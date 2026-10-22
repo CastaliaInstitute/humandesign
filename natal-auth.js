@@ -3,6 +3,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.57.4';
 const config = window.castaliaConfig || {};
 const statusNode = document.querySelector('#authStatus');
 const loginButton = document.querySelector('#signIn');
+const connectGitHubButton = document.querySelector('#connectGitHub');
 const logoutButton = document.querySelector('#signOut');
 const personA = document.querySelector('#personA');
 const personB = document.querySelector('#personB');
@@ -13,6 +14,7 @@ const menuToggle = document.querySelector('#menuToggle');
 const authMenu = document.querySelector('#authMenu');
 const names = { daniel: 'Person 1', camille: 'Person 2' };
 window.hdChartNames = names;
+let relationshipChildrenReady = Promise.resolve();
 function status(message) { statusNode.textContent = message; }
 function b64ToUtf8(value) {
   const bytes = Uint8Array.from(atob(value.replace(/\s/g, '')), c => c.charCodeAt(0));
@@ -46,9 +48,17 @@ async function loadFamilyDocument(login, token) {
 function profilesFrom(document) {
   const guardians = (document.guardians || []).map(p => ({ ...p, familyRole: 'guardian' }));
   const children = (document.children || []).map(p => ({ ...p, familyRole: 'child' }));
-  return [...guardians, ...children].filter(p =>
-    p && p.birth_date && p.birth_time && p.birth_place && p.latitude != null && p.longitude != null
-  ).map(p => ({
+  const profiles = [...guardians, ...children].filter(Boolean);
+  const hasBirthInputs = p => p.birth_date && p.birth_time && p.birth_place && p.latitude != null && p.longitude != null;
+  window.hdRelationshipProfilesWithoutNatalData = profiles.filter(p => !hasBirthInputs(p)).map(p => ({
+    name: p.name || 'Unnamed family member',
+    role: p.familyRole === 'child' ? 'child' : 'parent',
+    missing: [
+      !p.birth_date && 'birth date', !p.birth_time && 'birth time', !p.birth_place && 'birth place',
+      p.latitude == null && 'latitude', p.longitude == null && 'longitude'
+    ].filter(Boolean)
+  }));
+  return profiles.filter(hasBirthInputs).map(p => ({
     name: p.name, github: p.github, relationship: p.relationship, role: p.role, familyRole: p.familyRole,
     birth_date: p.birth_date, birth_time: p.birth_time, birth_time_status: p.birth_time_status,
     birth_place: p.birth_place, timezone: p.timezone, utc_offset_sec: p.utc_offset_sec,
@@ -163,15 +173,13 @@ async function publishChildren(profiles) {
     .filter(({ profile }) => profile.familyRole === 'child')
     // Newer birth dates are younger, so left-to-right layout follows increasing age.
     .sort((a, b) => String(b.profile.birth_date || '').localeCompare(String(a.profile.birth_date || '')) || a.originalIndex - b.originalIndex);
-  const children = await Promise.all(childProfiles.map(async ({ profile }, index) => {
-    try {
-      return { id: `child-${index + 1}`, name: profile.name || `Child ${index + 1}`, birthEpoch: epochFor(profile), ...await activeChart(profile) };
-    } catch (error) {
-      console.warn(`Skipping child chart for ${profile.name || `Child ${index + 1}`}:`, error.message);
-      return null;
-    }
-  }));
-  window.hdRelationshipChildren = children.filter(Boolean);
+  const children = await Promise.all(childProfiles.map(async ({ profile }, index) => ({
+    id: `child-${index + 1}`,
+    name: profile.name || `Child ${index + 1}`,
+    birthEpoch: epochFor(profile),
+    ...await activeChart(profile)
+  })));
+  window.hdRelationshipChildren = children;
   window.dispatchEvent(new CustomEvent('castalia-family-children-updated', { detail: window.hdRelationshipChildren }));
 }
 // Public sample charts publish the calculated gates, not the children's birth records.
@@ -299,7 +307,9 @@ async function applyProfiles(signedInChart = false, publicExample = false) {
   const b = profileFromBirthFields(baseB, 'B');
   status('Calculating Human Design activations…');
   try {
-    const [chartA, chartB] = await Promise.all([activeChart(a), activeChart(b)]);
+    // Chat readiness covers every known family chart, not only the two selected
+    // parents. installProfileOptions starts this promise before calling us.
+    const [chartA, chartB] = await Promise.all([activeChart(a), activeChart(b), relationshipChildrenReady]);
     window.hdFamilyBirthEpochs = { ...(window.hdFamilyBirthEpochs || {}), daniel: epochFor(a), camille: epochFor(b) };
     window.hdTimelineAnchor = { person: 'daniel', name: a.name || 'Person 1', birthEpoch: window.hdFamilyBirthEpochs.daniel };
     document.querySelector('#danielGates').value = chartA.gates.join(', ');
@@ -332,7 +342,7 @@ async function applyProfiles(signedInChart = false, publicExample = false) {
 }
 void applyProfiles(false, true);
 function installProfileOptions(profiles, login) {
-  void publishChildren(profiles);
+  relationshipChildrenReady = publishChildren(profiles);
   const mine = profiles.findIndex(p => normalizedLogin(p.github) === normalizedLogin(login));
   [personA, personB].forEach(select => { select.replaceChildren(); profiles.forEach((p, i) => select.add(new Option(p.name || `Profile ${i + 1}`, String(i)))); });
   const first = mine >= 0 ? mine : 0;
@@ -353,7 +363,7 @@ function installProfileOptions(profiles, login) {
   };
   personA.onchange = update; personB.onchange = update; update();
 }
-let supabase = null, loadedUser = null;
+let supabase = null, loadedUser = null, loadedGithubToken = null, githubIdentityLinked = false;
 let signedInProfilesPending = false;
 window.hdNatalProfilesReady = false;
 window.hdNatalProfilesError = '';
@@ -373,13 +383,28 @@ if (config.supabaseUrl && config.supabaseAnonKey) {
   supabase = createClient(config.supabaseUrl, config.supabaseAnonKey, { auth: { flowType: 'pkce', persistSession: true, autoRefreshToken: true } });
   loginButton.addEventListener('click', async () => {
     status('Opening Castalia sign-in…');
-    const { error } = await supabase.auth.signInWithOAuth({ provider: 'github', options: { redirectTo: location.origin + location.pathname, scopes: 'read:user user:email' } });
+    const { error } = await supabase.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: location.origin + location.pathname, queryParams: { prompt: 'select_account' } } });
     if (error) status(error.message);
+  });
+  connectGitHubButton.addEventListener('click', async () => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) { status('Sign in with Google first, then connect GitHub.'); return; }
+      status(githubIdentityLinked ? 'Refreshing GitHub access…' : 'Connecting GitHub…');
+      const result = githubIdentityLinked
+        ? await supabase.auth.signInWithOAuth({ provider: 'github', options: { redirectTo: location.origin + location.pathname, scopes: 'read:user user:email' } })
+        : await supabase.auth.linkIdentity({ provider: 'github', options: { redirectTo: location.origin + location.pathname, scopes: 'read:user user:email' } });
+      if (result.error) status(result.error.message);
+    } catch (error) { status(error.message || 'Could not connect GitHub.'); }
   });
   logoutButton.addEventListener('click', async () => { await supabase.auth.signOut(); location.reload(); });
   supabase.auth.onAuthStateChange((_event, session) => { publishAuthState(session); void handleSession(session); });
   supabase.auth.getSession().then(({ data }) => { publishAuthState(data.session); void handleSession(data.session); });
-} else { loginButton.disabled = true; status('Showing Daniel and Camille as example charts. Castalia sign-in is not configured yet.'); }
+} else {
+  loginButton.disabled = true;
+  connectGitHubButton.disabled = true;
+  status('Showing Daniel and Camille as example charts. Castalia sign-in is not configured yet.');
+}
 birthDetailsButton.addEventListener('click', () => showBirthDetails(birthDetails.hidden));
 if (menuToggle && authMenu) {
   menuToggle.addEventListener('click', () => {
@@ -406,11 +431,55 @@ document.querySelector('#applyBirthDetails').addEventListener('click', () => {
 });
 async function handleSession(session) {
   if (!session?.user || !supabase) return;
+  let identities = session.user.identities;
+  if (!Array.isArray(identities)) {
+    try {
+      const { data, error } = await supabase.auth.getUserIdentities();
+      if (error) { status(error.message); return; }
+      identities = data.identities || [];
+    } catch (error) { status(error.message || 'Could not read linked sign-in methods.'); return; }
+  }
+  const githubIdentity = identities.find(identity => identity.provider === 'github');
+  githubIdentityLinked = Boolean(githubIdentity);
+  if (!githubIdentityLinked) {
+    loadedUser = null;
+    loadedGithubToken = null;
+    loginButton.hidden = true;
+    connectGitHubButton.hidden = false;
+    connectGitHubButton.textContent = 'Connect GitHub for family charts';
+    logoutButton.hidden = false;
+    status('Signed in to Castalia. Connect GitHub to load your family charts; the public example remains available.');
+    return;
+  }
+  const githubData = githubIdentity.identity_data || {};
+  let login = githubData.user_name || githubData.login || githubData.preferred_username;
+  if (!login && session.provider_token) {
+    try { login = (await githubJson('https://api.github.com/user', session.provider_token)).login; }
+    catch (error) { status(error.message); return; }
+  }
+  if (!login) {
+    loginButton.hidden = true;
+    connectGitHubButton.hidden = false;
+    connectGitHubButton.textContent = 'Refresh GitHub access';
+    logoutButton.hidden = false;
+    status('GitHub is linked, but its username is unavailable. Refresh GitHub access to load family profiles.');
+    return;
+  }
+  if (loadedUser === session.user.id && loadedGithubToken === session.provider_token) return;
+  if (!session.provider_token) {
+    loginButton.hidden = true;
+    connectGitHubButton.hidden = false;
+    connectGitHubButton.textContent = 'Refresh GitHub access';
+    logoutButton.hidden = false;
+    status(`Signed in to Castalia as ${login}. Refresh GitHub access to load family profiles.`);
+    return;
+  }
+  loadedUser = session.user.id;
+  loadedGithubToken = session.provider_token;
+  loginButton.hidden = true;
+  connectGitHubButton.hidden = true;
+  logoutButton.hidden = false;
   window.hdUsingPublicExample = false;
-  const login = session.user.user_metadata?.user_name || session.user.user_metadata?.preferred_username || session.user.user_metadata?.login;
-  if (!login) { status('Castalia sign-in succeeded, but GitHub did not provide a username.'); return; }
-  if (loadedUser === session.user.id) return;
-  loadedUser = session.user.id; loginButton.hidden = true; logoutButton.hidden = false;
   window.hdNatalProfilesReady = false;
   window.hdNatalProfilesError = '';
   status(`Signed in as ${login}; finding your family natal data…`);
@@ -423,6 +492,7 @@ async function handleSession(session) {
     document.querySelector('#profilePicker').hidden = false;
   } catch (error) {
     loadedUser = null;
+    loadedGithubToken = null;
     signedInProfilesPending = false;
     window.hdNatalProfilesError = error.message;
     window.dispatchEvent(new Event('castalia-natal-profiles-ready'));
