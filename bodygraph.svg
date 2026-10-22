@@ -193,6 +193,7 @@ spreadCentersVertically();
 positionGatesOnCenterBorders();
 setLaneGeometry();
 straightenAllChannels();
+splineChannelAtNormalWalls('57-10','57','10');
 styleChannelBackdrops();
 connectChannelEndpointsToGates();
 function straightenAllChannels(){svg.querySelectorAll('.channel-group').forEach(group=>{const from=svg.getElementById('gate-'+group.dataset.from),to=svg.getElementById('gate-'+group.dataset.to);if(!from||!to)return;const start=gateInsetInGroup(from,group),end=gateInsetInGroup(to,group),d=`M${start.x.toFixed(3)},${start.y.toFixed(3)} L${end.x.toFixed(3)},${end.y.toFixed(3)}`;group.querySelectorAll('path').forEach(path=>path.setAttribute('d',d));});}
