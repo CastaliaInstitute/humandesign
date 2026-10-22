@@ -1223,6 +1223,10 @@ function addBodygraphSvgPlane(group, paths) {
     .gate[data-state="closed"][data-activation*="design"][data-activation*="personality"] .gate-marker{stroke:#7c3aed!important}`;
   const markup = new XMLSerializer().serializeToString(artwork);
   const texture = new THREE.TextureLoader().load(`data:image/svg+xml;charset=utf-8,${encodeURIComponent(markup)}`);
+  // The chart group flips its y axis to convert SVG's downward-positive
+  // coordinates into the upright Three.js plane; undo TextureLoader's image
+  // flip here so that transform doesn't turn the artwork upside down.
+  texture.flipY = false;
   texture.colorSpace = THREE.SRGBColorSpace;
   texture.generateMipmaps = true;
   texture.minFilter = THREE.LinearMipmapLinearFilter;
