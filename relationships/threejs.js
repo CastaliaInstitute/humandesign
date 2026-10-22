@@ -15,9 +15,9 @@ rotationReadout.textContent = 'Rotation 0°';
 document.body.append(rotationReadout);
 const status = document.querySelector('#status');
 const scene = new THREE.Scene();
-scene.background = new THREE.Color('#f8f5ed');
+scene.background = new THREE.Color('#000000');
 const chartViewHeight = 360;
-const chartSilhouetteWidth = 135;
+const chartSilhouetteWidth = 235;
 const parentChartScale = 0.9;
 // Orthographic projection keeps parallel chart planes the same apparent size,
 // which is essential for a mathematically exact front overlap.
@@ -47,6 +47,20 @@ lockOrbitElevation();
 
 const chartRoot = new THREE.Group();
 scene.add(chartRoot);
+const ambientParticles = new THREE.Points(
+  new THREE.BufferGeometry(),
+  new THREE.PointsMaterial({ color: '#8bd8ff', size: 1.8, transparent: true, opacity: 0.52, depthWrite: false, sizeAttenuation: true })
+);
+const ambientParticlePositions = new Float32Array(560 * 3);
+for (let i = 0; i < 560; i++) {
+  const radius = 280 + Math.random() * 650;
+  const angle = Math.random() * Math.PI * 2;
+  ambientParticlePositions[i * 3] = Math.cos(angle) * radius;
+  ambientParticlePositions[i * 3 + 1] = Math.random() * 600 - 80;
+  ambientParticlePositions[i * 3 + 2] = Math.sin(angle) * radius;
+}
+ambientParticles.geometry.setAttribute('position', new THREE.BufferAttribute(ambientParticlePositions, 3));
+scene.add(ambientParticles);
 // Rotate the family centers around their shared axis; chart planes counter-rotate
 // so every BodyGraph stays facing the camera throughout the turn.
 let familyAzimuth = THREE.MathUtils.degToRad(108);
@@ -79,6 +93,14 @@ try {
 let sourceDocument = null;
 let featureDocument = null;
 let loader = null;
+function templatePerson(person = 'daniel') {
+  return sourceDocument?.querySelector(person === 'daniel' ? '.person--daniel' : '.person--camille')
+    || sourceDocument?.querySelector('#bodygraph-art')
+    || sourceDocument?.documentElement;
+}
+function templateChannels(person = 'daniel') {
+  return [...(templatePerson(person)?.querySelectorAll('.channel-group[data-from][data-to]') || [])];
+}
 let natalParentsReady = false;
 const gateDescriptions = new Map();
 const channelDescriptions = new Map();
@@ -244,7 +266,7 @@ function cameraAzimuth() {
 function orientPlaneToCamera(group, scale, flipX, parentYaw = 0, centerZ = 0) {
   if (!group) return;
   const facingYaw = cameraAzimuth() - familyAzimuth - parentYaw;
-  const centerLocalX = (flipX ? -1 : 1) * 194.4 * scale;
+  const centerLocalX = (flipX ? -1 : 1) * 180 * scale;
   group.rotation.y = facingYaw;
   group.position.x = -centerLocalX * Math.cos(facingYaw);
   group.position.z = centerZ + centerLocalX * Math.sin(facingYaw);
@@ -269,7 +291,7 @@ function gatesFor(person) {
   return new Set(familyChildren.find(child => child.id === person)?.gates || []);
 }
 function summarizeChart(gates, activations) {
-  const template = sourceDocument?.querySelector('.person--daniel');
+  const template = templatePerson('daniel');
   if (!template) return null;
   const gateCenters = new Map([...template.querySelectorAll('.gate[data-gate][data-center]')]
     .map(gate => [+gate.dataset.gate, gate.dataset.center]));
@@ -350,13 +372,13 @@ function personCurrentlyInFront() {
   for (const person of ['daniel', 'camille']) {
     const group = planeGroups[person];
     if (!group?.visible) continue;
-    candidates.push({ person, point: group.localToWorld(new THREE.Vector3(194.4, chartViewHeight / 2, 0)) });
+    candidates.push({ person, point: group.localToWorld(new THREE.Vector3(180, chartViewHeight / 2, 0)) });
   }
   for (const child of familyChildren) {
     const group = familyGroups[child.id];
     if (!group?.visible) continue;
     const chart = group.children.find(item => item.name.includes('SVG plane'));
-    if (chart) candidates.push({ person: child.id, point: chart.localToWorld(new THREE.Vector3(194.4, chartViewHeight / 2, 0)) });
+    if (chart) candidates.push({ person: child.id, point: chart.localToWorld(new THREE.Vector3(180, chartViewHeight / 2, 0)) });
   }
   if (!candidates.length) return frontPerson;
   const scores = candidates.map(candidate => ({ ...candidate, depth: candidate.point.sub(target).dot(towardViewer) }));
@@ -400,7 +422,7 @@ function frontFamilyReading() {
     const allTransitGates = new Set(transitSnapshot?.gates || []);
     const chartTransits = [...allTransitGates].filter(gate => !chartGates.has(gate));
     const transitChannelChanges = transitToggle.checked && transitSnapshot
-      ? [...sourceDocument.querySelectorAll('.person--daniel .channel-group[data-from][data-to]')].flatMap(node => {
+      ? templateChannels('daniel').flatMap(node => {
         const from = +node.dataset.from, to = +node.dataset.to;
         const id = `${Math.min(from, to)}-${Math.max(from, to)}`;
         const transitGates = [from, to].filter(gate => allTransitGates.has(gate) && !chartGates.has(gate));
@@ -431,7 +453,7 @@ function frontFamilyReading() {
         description: gateDescriptions.get(gate)?.description || '',
         center: gateDescriptions.get(gate)?.center || ''
       })),
-      natalChannelDetails: [...sourceDocument.querySelectorAll('.person--daniel .channel-group[data-from][data-to]')].flatMap(node => {
+      natalChannelDetails: templateChannels('daniel').flatMap(node => {
         const from = +node.dataset.from, to = +node.dataset.to;
         if (!chartGates.has(from) || !chartGates.has(to)) return [];
         const id = `${Math.min(from, to)}-${Math.max(from, to)}`;
@@ -465,7 +487,7 @@ function frontFamilyReading() {
     const roleA = personA === 'daniel' || personA === 'camille' ? 'parent' : 'child';
     const roleB = personB === 'daniel' || personB === 'camille' ? 'parent' : 'child';
     const relationshipType = roleA === 'parent' && roleB === 'parent' ? 'parent-parent' : roleA === 'child' && roleB === 'child' ? 'child-child' : 'parent-child';
-    const natalBridges = [...sourceDocument.querySelectorAll('.person--daniel .channel-group[data-from][data-to]')].flatMap(node => {
+    const natalBridges = templateChannels('daniel').flatMap(node => {
       const from = +node.dataset.from, to = +node.dataset.to;
       if (!(gatesA.has(from) || gatesB.has(from)) || !(gatesA.has(to) || gatesB.has(to))) return [];
       if ((gatesA.has(from) && gatesA.has(to)) || (gatesB.has(from) && gatesB.has(to))) return [];
@@ -517,7 +539,7 @@ function frontFamilyReading() {
     const gatesA = gates.get(personA) || new Set();
     const gatesB = gates.get(personB) || new Set();
     const natalGates = { [personA]: gatesA, [personB]: gatesB };
-    return [...sourceDocument.querySelectorAll('.person--daniel .channel-group[data-from][data-to]')].flatMap(node => {
+    return templateChannels('daniel').flatMap(node => {
       const from = +node.dataset.from, to = +node.dataset.to;
       const channel = `${Math.min(from, to)}-${Math.max(from, to)}`;
       if ((gatesA.has(from) && gatesA.has(to)) || (gatesB.has(from) && gatesB.has(to))) return [];
@@ -623,7 +645,7 @@ function frontFamilyReading() {
   const natalFrontGates = gates.get(readingPerson);
   const transitGates = new Set(transitSnapshot?.gates || []);
   const transitChannels = [];
-  const channels = [...sourceDocument.querySelectorAll('.person--daniel .channel-group[data-from][data-to]')].map(channel => {
+  const channels = templateChannels('daniel').map(channel => {
     const from = +channel.dataset.from, to = +channel.dataset.to;
     const id = `${Math.min(from, to)}-${Math.max(from, to)}`;
     return { id, from, to, label: id.replace('-', '–'), reading: channelDescriptions.get(id) || relationshipChannelReadings[id] };
@@ -804,7 +826,7 @@ document.querySelector('#generateFamilyReading')?.addEventListener('click', asyn
   }
 });
 controls.addEventListener('change', refreshFrontFamilyReading);
-const pale = new THREE.Color('#fffcf5');
+const pale = new THREE.Color('#070707');
 const gray = new THREE.Color('#96928a');
 const centerDescriptions = {
   head: ['Head', 'Inspiration, questions, and mental pressure.'],
@@ -1096,15 +1118,15 @@ function makePlaneGroup(paths, person, sharedChannels, relationshipChannels, opt
       const roadColor = color;
       // In exact front view, separate shared tracks by a few pixels so both
       // contributors remain visibly blue and pink instead of blending purple.
-      const opacity = active ? (exactFrontAlignment ? 0.46 : 0.78) : 0.045;
+      const opacity = active ? (exactFrontAlignment ? 0.82 : 0.9) : 0.13;
       const sharedOffset = exactFrontAlignment && active && sharedChannels.has(channelId) ? (person === 'daniel' ? -2.2 : 2.2) : 0;
       // Each SVG rail becomes a two-lane carriageway; the divider and dashed lane marks make the road legible in depth.
       const roadMat = lineMaterial(roadColor, opacity);
-      const laneMat = lineMaterial(pale, active ? (exactFrontAlignment ? 0.22 : 0.7) : 0.035);
+      const laneMat = lineMaterial(pale, active ? (exactFrontAlignment ? 0.38 : 0.58) : 0.08);
       for (const subPath of path.subPaths) {
         const rawPoints = subPath.getPoints(16);
         const points = sharedOffset ? offsetPathPoints(rawPoints, sharedOffset) : rawPoints;
-        const road = tubeFromPoints(points, active ? 1.75 : 0.42, roadMat, 2.4);
+        const road = tubeFromPoints(points, active ? 1.45 : 0.64, roadMat, 2.4);
         if (road) { if (hover) Object.assign(road.userData, hover); group.add(road); }
         if (active && points.length > 2) {
           const from = gatePoints.get(+channel.dataset.from);
@@ -1138,14 +1160,14 @@ function makePlaneGroup(paths, person, sharedChannels, relationshipChannels, opt
         ? '#cf2943'
         : gateActivations.some(item => item.type === 'personality') ? '#24231f' : color;
       const fillColor = isGateMarker ? (transitActive ? transitColor : gateActive ? gateFillColor : pale) : (centerActiveGateCount ? color : pale);
-      const centerTintBase = exactFrontAlignment ? 0.12 : 0.18;
+      const centerTintBase = exactFrontAlignment ? 0.08 : 0.12;
       const centerTintPerGate = exactFrontAlignment ? 0.055 : 0.07;
       const centerTint = centerActiveGateCount
         ? Math.min(exactFrontAlignment ? 0.58 : 0.76, centerTintBase + centerActiveGateCount * centerTintPerGate)
         : 0.12;
       const fillOpacity = isCenterShape
         ? centerTint
-        : transitActive ? 0.86 : gateActive ? (exactFrontAlignment ? 0.35 : 0.55) : 0;
+        : transitActive ? 0.9 : gateActive ? (exactFrontAlignment ? 0.78 : 0.88) : 0;
       const fillMat = new THREE.MeshBasicMaterial({ color: fillColor, transparent: true, opacity: fillOpacity, side: THREE.DoubleSide, depthWrite: false });
       const outlineActive = isCenterShape ? centerActive : gateActive || transitActive;
       const outlineColor = isGateMarker && transitActive ? transitColor : color;
@@ -1178,10 +1200,10 @@ function makePlaneGroup(paths, person, sharedChannels, relationshipChannels, opt
   }
   // SVG coordinates use a downward-positive Y axis. Flip the finished plane so the chart reads upright in 3D.
   group.scale.y = -1;
-  group.position.set(-194.4, chartViewHeight, 0);
+  group.position.set(-180, chartViewHeight, 0);
   if (options.scale) {
     const xScale = options.flipX ? -options.scale : options.scale;
-    const xOffset = options.flipX ? 194.4 * options.scale : -194.4 * options.scale;
+    const xOffset = options.flipX ? 180 * options.scale : -180 * options.scale;
     group.scale.set(xScale, -options.scale, options.scale);
     group.position.set(xOffset + (options.offsetX || 0), chartViewHeight * options.scale + (options.offsetY || 0), 0);
   }
@@ -1192,11 +1214,15 @@ function parseGateList(selector) {
 }
 function extractLayer(doc, person, gates) {
   const svg = doc.documentElement.cloneNode(true);
-  const keep = svg.querySelector(person === 'daniel' ? '.person--daniel' : '.person--camille');
-  // In exact-front mode, remove each layer's presentation offset so both charts share identical XY coordinates.
-  if (keep && exactFrontAlignment) keep.setAttribute('transform', 'scale(1.08 1)');
-  svg.querySelectorAll('.canvas').forEach(el => el.remove());
-  svg.querySelectorAll('.person--daniel, .person--camille').forEach(el => { if (el !== keep) el.remove(); });
+  const keep = svg.querySelector(person === 'daniel' ? '.person--daniel' : '.person--camille') || svg.querySelector('#bodygraph-art');
+  // The current bodygraph template has one chart with its own centered art transform.
+  if (!keep) throw new Error('BodyGraph template is missing its chart artwork');
+  if (keep.id === 'bodygraph-art') keep.setAttribute('transform', 'translate(-72 0) scale(1.4 1)');
+  else if (exactFrontAlignment) keep.setAttribute('transform', 'scale(1.08 1)');
+  for (const child of [...svg.children]) {
+    if (child === keep || ['defs', 'style'].includes(child.localName)) continue;
+    child.remove();
+  }
   keep.querySelectorAll('.gate').forEach(g => g.setAttribute('data-state', gates.has(+g.dataset.gate) ? 'closed' : 'open'));
   const centerChannelCounts = new Map();
   const gateCenters = new Map([...keep.querySelectorAll('.gate[data-gate][data-center]')].map(gate => [+gate.dataset.gate, gate.dataset.center]));
@@ -1259,7 +1285,7 @@ function chartPointInFamily(point, person, localDepth = 0) {
   } else {
     centerZ = person === frontPerson ? familyLayout.parentRadius : -familyLayout.parentRadius;
   }
-  const localX = point.x * scale - 194.4 * scale;
+  const localX = point.x * scale - 180 * scale;
   const localY = -point.y * scale + chartViewHeight * scale + centerY;
   const localZ = localDepth * scale;
   const facingYaw = cameraAzimuth() - familyAzimuth;
@@ -1291,7 +1317,7 @@ function overlappingChartPairs() {
     if (person === 'camille') return planeGroups.camille?.visible ?? true;
     return familyGroups[person]?.visible ?? true;
   }).map(person => {
-    const center = chartPointInFamily({ x: 194.4, y: chartViewHeight / 2 }, person);
+    const center = chartPointInFamily({ x: 180, y: chartViewHeight / 2 }, person);
     const screen = camera.worldToLocal(chartRoot.localToWorld(center));
     return { person, x: screen.x, y: screen.y };
   });
@@ -1502,7 +1528,7 @@ function makeTransitGroup(data, snapshot, natalGates, person) {
   // Transit gate color is applied directly to the gate marker on the natal
   // plane. This overlay adds only the dashed temporary channels and their flow.
   group.scale.y = -1;
-  group.position.set(-194.4, 194.4, 0);
+  group.position.set(-180, 180, 0);
   return group;
 }
 function rebuildRelationship() {
@@ -1529,7 +1555,7 @@ function rebuildRelationship() {
   const overlapPairs = overlappingChartPairs();
   const exchangePairs = visibleFamilyPairs();
   const relationshipChannels = new Set();
-  const channelElements = [...sourceDocument.querySelectorAll('.person--daniel .channel-group[data-from][data-to]')];
+  const channelElements = templateChannels('daniel');
   for (const [personA, personB] of exchangePairs) {
       for (const channel of channelElements) {
         const a = +channel.dataset.from, b = +channel.dataset.to;
@@ -1572,7 +1598,7 @@ function rebuildRelationship() {
       const transitData = loader.parse(extractLayer(sourceDocument, person, activations));
       const group = makeTransitGroup(transitData, activeTransitSnapshot, natalGates, person);
       group.scale.set(familyLayout.parentScale, -familyLayout.parentScale, familyLayout.parentScale);
-      group.position.set(-194.4 * familyLayout.parentScale, chartViewHeight * familyLayout.parentScale, 0);
+      group.position.set(-180 * familyLayout.parentScale, chartViewHeight * familyLayout.parentScale, 0);
       group.position.z = planeGroups[person].position.z;
       transitGroups[person] = group;
       chartRoot.add(group);
@@ -1612,7 +1638,7 @@ function rebuildRelationship() {
       const transitData = loader.parse(extractLayer(sourceDocument, 'daniel', activations));
       const transitGroup = makeTransitGroup(transitData, activeTransitSnapshot, childGates, child.id);
       transitGroup.scale.set(flipX ? -childScale : childScale, -childScale, childScale);
-      transitGroup.position.set(flipX ? 194.4 * childScale : -194.4 * childScale, chartViewHeight * childScale, 0);
+      transitGroup.position.set(flipX ? 180 * childScale : -180 * childScale, chartViewHeight * childScale, 0);
       transitGroups[child.id] = transitGroup;
       childPosition.add(transitGroup);
       transitGroup.visible = transitToggle.checked;
@@ -1860,7 +1886,7 @@ function resize() {
   // avoids shrinking the charts based on the circle's hidden depth.
   const desiredHalfWidth = rect.width * chartWidth / (rect.width * 0.4);
   const chartCenters = Object.keys(currentNatalGates || {}).map(person =>
-    chartPointInFamily({ x: 194.4, y: chartViewHeight / 2 }, person)
+    chartPointInFamily({ x: 180, y: chartViewHeight / 2 }, person)
   );
   let projectedHalfWidth = 0;
   if (chartCenters.length) {
@@ -2067,10 +2093,10 @@ function loadFeatureDescriptions(svgDocument) {
 
 async function init() {
   try {
-    const response = await fetch('../relationship.svg');
-    if (!response.ok) throw new Error(`relationship.svg returned ${response.status}`);
+    const response = await fetch('../bodygraph.svg');
+    if (!response.ok) throw new Error(`bodygraph.svg returned ${response.status}`);
     sourceDocument = new DOMParser().parseFromString(await response.text(), 'image/svg+xml');
-    if (sourceDocument.querySelector('parsererror')) throw new Error('relationship.svg could not be parsed');
+    if (sourceDocument.querySelector('parsererror')) throw new Error('bodygraph.svg could not be parsed');
     try {
       const descriptionsResponse = await fetch('../bodygraph.svg');
       if (descriptionsResponse.ok) {
@@ -2083,7 +2109,7 @@ async function init() {
     loader = new SVGLoader();
     if (Array.isArray(window.hdRelationshipChildren)) familyChildren = window.hdRelationshipChildren;
     familyChildren.forEach((child, index) => { window.hdChartNames[child.id] = child.name || `Child ${index + 1}`; });
-    // relationship.svg is geometry only; natal-auth.js supplies actual gates.
+    // Natal auth supplies each chart's actual activated gates.
     if (window.hdNatalPlanetaryActivations &&
         document.querySelector('#danielGates').value.trim() &&
         document.querySelector('#camilleGates').value.trim()) {
@@ -2180,6 +2206,13 @@ function animate() {
   const angle = THREE.MathUtils.euclideanModulo(familyAzimuth - cameraAzimuth + Math.PI, Math.PI * 2) - Math.PI;
   rotationReadout.textContent = `Rotation ${Math.round(THREE.MathUtils.radToDeg(angle))}°`;
   const elapsed = now / 1000;
+  ambientParticles.rotation.y = elapsed * 0.006;
+  const ambientPositions = ambientParticles.geometry.attributes.position.array;
+  for (let i = 1; i < ambientPositions.length; i += 3) {
+    ambientPositions[i] += 0.035;
+    if (ambientPositions[i] > 520) ambientPositions[i] = -80;
+  }
+  ambientParticles.geometry.attributes.position.needsUpdate = true;
   for (const flow of flowAnimations) {
     flow.bead.visible = channelFlowEnabled;
     if (!channelFlowEnabled) continue;
