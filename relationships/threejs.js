@@ -36,14 +36,11 @@ controls.minDistance = 330;
 controls.maxDistance = 1450;
 controls.minZoom = 0.45;
 controls.maxZoom = 3;
+// Allow vertical OrbitControls drags to tilt the family into a top or bottom
+// view; a small pole margin avoids the singularity at a perfectly vertical view.
+controls.minPolarAngle = 0.05;
+controls.maxPolarAngle = Math.PI - 0.05;
 controls.update();
-function lockOrbitElevation() {
-  const offset = camera.position.clone().sub(controls.target);
-  const elevation = Math.acos(THREE.MathUtils.clamp(offset.y / offset.length(), -1, 1));
-  controls.minPolarAngle = elevation;
-  controls.maxPolarAngle = elevation;
-}
-lockOrbitElevation();
 
 const chartRoot = new THREE.Group();
 scene.add(chartRoot);
@@ -2270,7 +2267,6 @@ function orient(mode) {
   if (mode === 'edge') camera.position.set(800, familyViewCenterY, 0.01);
   else camera.position.set(0, familyViewCenterY, 820);
   controls.target.set(0, familyViewCenterY, 0);
-  lockOrbitElevation();
   controls.update();
   syncChartFacing();
   refreshRelationshipPairing();
