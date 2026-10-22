@@ -80,6 +80,8 @@ const planeGroups = {};
 let relationshipGroup = null;
 let activeRelationshipPairKey = '';
 let lastRelationshipFacingAngle = null;
+let orbitDragging = false;
+let lastRelationshipRefreshAt = 0;
 let currentChartData = null;
 let currentNatalGates = null;
 let currentTransitSnapshot = null;
@@ -831,6 +833,12 @@ document.querySelector('#generateFamilyReading')?.addEventListener('click', asyn
   } finally {
     button.disabled = false;
   }
+});
+controls.addEventListener('start', () => { orbitDragging = true; });
+controls.addEventListener('end', () => {
+  orbitDragging = false;
+  refreshRelationshipPairing(true);
+  refreshFrontFamilyReading();
 });
 controls.addEventListener('change', refreshFrontFamilyReading);
 const pale = new THREE.Color('#070707');
@@ -1617,8 +1625,14 @@ function overlappingChartPairs() {
   }
   return pairs;
 }
-function refreshRelationshipPairing() {
+function refreshRelationshipPairing(force = false) {
   if (!currentChartData || !currentNatalGates) return;
+  // Rebuilding channel geometry parses SVG paths and disposes GPU resources.
+  // OrbitControls emits changes on every drag frame, so defer that work until
+  // the drag settles and cap refreshes during damping and auto-rotation.
+  if (orbitDragging && !force) return;
+  const now = performance.now();
+  if (!force && now - lastRelationshipRefreshAt < 300) return;
   const pairs = overlappingChartPairs();
   const key = pairs.map(pair => pair.join(':')).sort().join('|');
   const facingAngle = cameraAzimuth() - familyAzimuth;
@@ -1626,6 +1640,7 @@ function refreshRelationshipPairing() {
     Math.abs(THREE.MathUtils.euclideanModulo(facingAngle - lastRelationshipFacingAngle + Math.PI, Math.PI * 2) - Math.PI);
   const pairChanged = key !== activeRelationshipPairKey;
   if (!pairChanged && facingDelta < THREE.MathUtils.degToRad(0.5)) return;
+  lastRelationshipRefreshAt = now;
   activeRelationshipPairKey = key;
   lastRelationshipFacingAngle = facingAngle;
   releaseGroup(relationshipGroup);
@@ -2329,7 +2344,9 @@ function positionTip(clientX, clientY) {
   tip.style.top = `${Math.max(12, Math.min(clientY + 14, window.innerHeight - tip.offsetHeight - 12))}px`;
 }
 canvas.addEventListener('pointermove', event => {
-  if (event.pointerType === 'touch') return;
+  // OrbitControls owns pointer moves during a drag; raycasting every chart
+  // feature on those same high-frequency events can stall or exhaust the page.
+  if (event.pointerType === 'touch' || event.buttons !== 0 || orbitDragging) return;
   const hit = featureAt(event.clientX, event.clientY);
   if (!hit) { if (!selectedKey) clearHover(); return; }
   setHover(hit.object.userData.hoverTip, hit.object.userData.hoverKey);
