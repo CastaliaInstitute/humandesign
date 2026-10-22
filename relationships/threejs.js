@@ -17,13 +17,15 @@ document.body.append(rotationReadout);
 const status = document.querySelector('#status');
 const scene = new THREE.Scene();
 scene.background = new THREE.Color('#000000');
-const chartViewHeight = 360;
+// The SVG's vertical spread can place the root center below its nominal
+// 360-unit viewBox. Preserve that full geometry in the family texture/planes.
+const chartFrameHeight = 430;
 const chartSilhouetteWidth = 235;
 const parentChartScale = 0.9;
 // Orthographic projection keeps parallel chart planes the same apparent size,
 // which is essential for a mathematically exact front overlap.
 const camera = new THREE.OrthographicCamera(-300, 300, 300, -300, 1, 3000);
-const familyViewCenterY = chartViewHeight * parentChartScale / 2;
+const familyViewCenterY = chartFrameHeight * parentChartScale / 2;
 camera.position.set(0, familyViewCenterY, 820);
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
@@ -232,7 +234,7 @@ function addChartInitial(person, initial, color) {
 function syncChartInitials() {
   chartRoot.updateMatrixWorld(true);
   for (const [person, { sprite }] of chartInitials) {
-    const point = chartPointInFamily({ x: 180, y: chartViewHeight + 22 }, person);
+    const point = chartPointInFamily({ x: 180, y: chartFrameHeight + 22 }, person);
     sprite.position.copy(chartRoot.localToWorld(point));
     sprite.visible = person === 'daniel' ? (planeGroups.daniel?.visible ?? true)
       : person === 'camille' ? (planeGroups.camille?.visible ?? true)
@@ -398,7 +400,7 @@ function orientPlaneToCamera(group, scale, flipX, parentYaw = 0, centerZ = 0, pa
   group.quaternion.copy(upright).slerp(faceInward, topViewAmount());
 
   // Keep the chart center fixed while its plane pitches and turns.
-  const localChartCenter = new THREE.Vector3(180 * group.scale.x, 180 * group.scale.y, 0).applyQuaternion(group.quaternion);
+  const localChartCenter = new THREE.Vector3(180 * group.scale.x, chartFrameHeight / 2 * group.scale.y, 0).applyQuaternion(group.quaternion);
   group.position.set(0, familyViewCenterY, centerZ).sub(localChartCenter);
 }
 function syncChartFacing() {
@@ -524,13 +526,13 @@ function personCurrentlyInFront() {
   for (const person of ['daniel', 'camille']) {
     const group = planeGroups[person];
     if (!group?.visible) continue;
-    candidates.push({ person, point: group.localToWorld(new THREE.Vector3(180, chartViewHeight / 2, 0)) });
+    candidates.push({ person, point: group.localToWorld(new THREE.Vector3(180, chartFrameHeight / 2, 0)) });
   }
   for (const child of familyChildren) {
     const group = familyGroups[child.id];
     if (!group?.visible) continue;
     const chart = group.children.find(item => item.name.includes('SVG plane'));
-    if (chart) candidates.push({ person: child.id, point: chart.localToWorld(new THREE.Vector3(180, chartViewHeight / 2, 0)) });
+    if (chart) candidates.push({ person: child.id, point: chart.localToWorld(new THREE.Vector3(180, chartFrameHeight / 2, 0)) });
   }
   if (!candidates.length) return frontPerson;
   const scores = candidates.map(candidate => ({ ...candidate, depth: candidate.point.sub(target).dot(towardViewer) }));
@@ -1545,7 +1547,7 @@ function addBodygraphSvgPlane(group, paths) {
   if (!svgRoot) return;
   const artwork = svgRoot.cloneNode(true);
   artwork.setAttribute('width', '360');
-  artwork.setAttribute('height', '360');
+  artwork.setAttribute('height', String(chartFrameHeight));
   artwork.removeAttribute('style');
   artwork.removeAttribute('role');
   artwork.removeAttribute('aria-labelledby');
@@ -1569,10 +1571,10 @@ function addBodygraphSvgPlane(group, paths) {
   texture.minFilter = THREE.LinearMipmapLinearFilter;
   texture.magFilter = THREE.LinearFilter;
   const plane = new THREE.Mesh(
-    new THREE.PlaneGeometry(360, 360),
+    new THREE.PlaneGeometry(360, chartFrameHeight),
     new THREE.MeshBasicMaterial({ map: texture, toneMapped: false, transparent: true, side: THREE.DoubleSide, depthWrite: false })
   );
-  plane.position.set(180, 180, 0);
+  plane.position.set(180, chartFrameHeight / 2, 0);
   plane.userData.svgArtwork = true;
   plane.renderOrder = 0;
   group.add(plane);
@@ -1716,12 +1718,12 @@ function makePlaneGroup(paths, person, sharedChannels, relationshipChannels, opt
   });
   // SVG coordinates use a downward-positive Y axis. Flip the finished plane so the chart reads upright in 3D.
   group.scale.y = -1;
-  group.position.set(-180, chartViewHeight, 0);
+  group.position.set(-180, chartFrameHeight, 0);
   if (options.scale) {
     const xScale = options.flipX ? -options.scale : options.scale;
     const xOffset = options.flipX ? 180 * options.scale : -180 * options.scale;
     group.scale.set(xScale, -options.scale, options.scale);
-    group.position.set(xOffset + (options.offsetX || 0), chartViewHeight * options.scale + (options.offsetY || 0), 0);
+    group.position.set(xOffset + (options.offsetX || 0), chartFrameHeight * options.scale + (options.offsetY || 0), 0);
   }
   return group;
 }
@@ -1774,7 +1776,7 @@ function extractLayer(doc, person, gates, activations = []) {
     if (shape) shape.style.fillOpacity = count > 0 ? '.22' : '';
   });
   svg.querySelectorAll('script,#gate-state-legend,#flow-control,#flow-direction-legend,#svg-tooltip').forEach(el => el.remove());
-  svg.setAttribute('viewBox', '0 0 360 360');
+  svg.setAttribute('viewBox', `0 0 360 ${chartFrameHeight}`);
   return new XMLSerializer().serializeToString(svg);
 }
 function releaseGroup(group) {
@@ -1807,7 +1809,7 @@ function chartPointInFamily(point, person, localDepth = 0) {
   if (!chart) {
     const scale = isChild ? familyLayout.childScale : familyLayout.parentScale;
     const centerZ = person === frontPerson ? familyLayout.parentRadius : -familyLayout.parentRadius;
-    return new THREE.Vector3((point.x - 180) * scale, -point.y * scale + chartViewHeight * scale, centerZ + localDepth * scale);
+    return new THREE.Vector3((point.x - 180) * scale, -point.y * scale + chartFrameHeight * scale, centerZ + localDepth * scale);
   }
   chartRoot.updateWorldMatrix(true, true);
   const worldPoint = chart.localToWorld(new THREE.Vector3(point.x, point.y, localDepth));
@@ -1838,7 +1840,7 @@ function overlappingChartPairs() {
     const halfWidth = chartSilhouetteWidth / 2;
     const corners = [
       { x: 180 - halfWidth, y: 0 }, { x: 180 + halfWidth, y: 0 },
-      { x: 180 - halfWidth, y: chartViewHeight + 34 }, { x: 180 + halfWidth, y: chartViewHeight + 34 }
+      { x: 180 - halfWidth, y: chartFrameHeight + 24 }, { x: 180 + halfWidth, y: chartFrameHeight + 24 }
     ].map(point => camera.worldToLocal(chartRoot.localToWorld(chartPointInFamily(point, person))));
     return {
       person,
@@ -2152,7 +2154,7 @@ function rebuildRelationship() {
       const transitData = loader.parse(extractLayer(sourceDocument, person, activations, window.hdNatalPlanetaryActivations?.[person] || []));
       const group = makeTransitGroup(transitData, activeTransitSnapshot, natalGates, person);
       group.scale.set(familyLayout.parentScale, -familyLayout.parentScale, familyLayout.parentScale);
-      group.position.set(-180 * familyLayout.parentScale, chartViewHeight * familyLayout.parentScale, 0);
+      group.position.set(-180 * familyLayout.parentScale, chartFrameHeight * familyLayout.parentScale, 0);
       group.position.z = planeGroups[person].position.z;
       transitGroups[person] = group;
       chartRoot.add(group);
@@ -2192,7 +2194,7 @@ function rebuildRelationship() {
       const transitData = loader.parse(extractLayer(sourceDocument, 'daniel', activations, child.activations || []));
       const transitGroup = makeTransitGroup(transitData, activeTransitSnapshot, childGates, child.id);
       transitGroup.scale.set(flipX ? -childScale : childScale, -childScale, childScale);
-      transitGroup.position.set(flipX ? 180 * childScale : -180 * childScale, chartViewHeight * childScale, 0);
+      transitGroup.position.set(flipX ? 180 * childScale : -180 * childScale, chartFrameHeight * childScale, 0);
       transitGroups[child.id] = transitGroup;
       childPosition.add(transitGroup);
       transitGroup.visible = transitToggle.checked;
@@ -2441,7 +2443,7 @@ function fitCameraToFamily(rect = canvas.getBoundingClientRect()) {
   if (!rect.width || !rect.height) return;
   const aspect = rect.width / rect.height;
   const chartWidth = chartSilhouetteWidth * familyLayout.parentScale;
-  const chartHeight = chartViewHeight * familyLayout.parentScale;
+  const chartHeight = chartFrameHeight * familyLayout.parentScale;
   const halfWidth = chartSilhouetteWidth / 2;
   const persons = Object.keys(currentNatalGates || {}).filter(person => {
     if (person === 'daniel') return planeGroups.daniel?.visible ?? true;
@@ -2456,9 +2458,8 @@ function fitCameraToFamily(rect = canvas.getBoundingClientRect()) {
   for (const person of persons) {
     for (const point of [
       { x: 180 - halfWidth, y: 0 }, { x: 180 + halfWidth, y: 0 },
-      // Include the root edge and the name tags below the SVG viewBox; the
-      // overlap test already accounts for this 34-unit lower extension.
-      { x: 180 - halfWidth, y: chartViewHeight + 34 }, { x: 180 + halfWidth, y: chartViewHeight + 34 }
+      // Include the dynamically spread root center and its name tag below it.
+      { x: 180 - halfWidth, y: chartFrameHeight + 24 }, { x: 180 + halfWidth, y: chartFrameHeight + 24 }
     ]) {
       const world = chartRoot.localToWorld(chartPointInFamily(point, person));
       const relative = world.sub(controls.target);
