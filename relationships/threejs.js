@@ -293,6 +293,27 @@ function syncChartFacing() {
     orientPlaneToCamera(transitGroups[child.id], familyLayout.childScale, false, parent.rotation.y);
   });
 }
+function worldPointInFamily(point) {
+  chartRoot.updateWorldMatrix(true, false);
+  return chartRoot.worldToLocal(point.clone());
+}
+function worldVectorInFamily(origin, vector) {
+  const localOrigin = worldPointInFamily(origin);
+  return worldPointInFamily(origin.clone().add(vector)).sub(localOrigin);
+}
+function worldVectorInObject(object, origin, vector) {
+  object.updateWorldMatrix(true, false);
+  const localOrigin = object.worldToLocal(origin.clone());
+  const localTip = object.worldToLocal(origin.clone().add(vector));
+  return localTip.sub(localOrigin);
+}
+function attachParticleToFamily(bead, worldPosition, worldVelocity) {
+  const localPosition = worldPointInFamily(worldPosition);
+  const localVelocity = worldVectorInFamily(worldPosition, worldVelocity);
+  chartRoot.attach(bead);
+  bead.position.copy(localPosition);
+  return localVelocity;
+}
 function gatesFor(person) {
   if (person === 'daniel') return parseGateList('#danielGates');
   if (person === 'camille') return parseGateList('#camilleGates');
@@ -1062,11 +1083,12 @@ function releaseCenterParticleInto3D(particle) {
   const normal = new THREE.Vector3(0, 0, Math.random() < 0.5 ? -1 : 1).applyQuaternion(rotation).normalize();
   const tangent = particle.velocity.clone().applyQuaternion(rotation).normalize();
   const lateral = new THREE.Vector3(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).normalize();
-  particle.escapeVelocity = normal.multiplyScalar(34 + Math.random() * 18)
+  const worldVelocity = normal.multiplyScalar(34 + Math.random() * 18)
     .addScaledVector(tangent, 10 + Math.random() * 8)
     .addScaledVector(lateral, 8 + Math.random() * 8);
-  scene.attach(particle.bead);
-  particle.bead.position.copy(worldPosition);
+  // Center motes leave the flat polygon into its chart's local 3D space. Keep
+  // them under that chart so camera-facing corrections cannot strand them.
+  particle.escapeVelocity = worldVectorInObject(parent, worldPosition, worldVelocity);
   particle.bead.scale.setScalar(1);
   particle.state = 'escaped';
   particle.age = 0;
@@ -1083,11 +1105,9 @@ function releaseParticleInto3D(flow) {
   tangent.applyQuaternion(worldRotation).normalize();
   const normal = new THREE.Vector3(0, 0, Math.random() < 0.5 ? -1 : 1).applyQuaternion(worldRotation).normalize();
   const lateral = new THREE.Vector3(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).normalize();
-  flow.escapeVelocity = normal.multiplyScalar(42 + Math.random() * 22)
+  const worldVelocity = normal.multiplyScalar(42 + Math.random() * 22)
     .addScaledVector(tangent, 12 + Math.random() * 8)
     .addScaledVector(lateral, 8 + Math.random() * 8);
-  scene.attach(flow.bead);
-  flow.bead.position.copy(worldPosition);
   flow.bead.scale.setScalar(1);
   const receiver = findReceivingChannel(flow);
   if (receiver) {
@@ -1100,8 +1120,10 @@ function releaseParticleInto3D(flow) {
     const targetNormal = new THREE.Vector3(0, 0, 1)
       .applyQuaternion(receiver.container.getWorldQuaternion(new THREE.Quaternion())).normalize();
     const lift = Math.min(130, 35 + distance * 0.22);
-    flow.transitStart = worldPosition.clone();
-    flow.transitControl1 = worldPosition.clone().addScaledVector(normal, lift).addScaledVector(tangent, 28);
+    flow.transitStart = worldPointInFamily(worldPosition);
+    const control1World = worldPosition.clone().addScaledVector(normal, lift).addScaledVector(tangent, 28);
+    flow.transitControl1 = worldPointInFamily(control1World);
+    attachParticleToFamily(flow.bead, worldPosition, worldVelocity);
     flow.transitReceiver = receiver;
     flow.transitReverse = targetReverse;
     flow.transitDuration = THREE.MathUtils.clamp(distance / (52 + Math.random() * 22), 1.4, 8);
@@ -1112,6 +1134,7 @@ function releaseParticleInto3D(flow) {
     flow.transitLift = lift;
     return;
   }
+  flow.escapeVelocity = worldVectorInObject(parent, worldPosition, worldVelocity);
   flow.state = 'escaped';
   flow.escapeAge = 0;
   flow.escapeDuration = 0.8 + Math.random() * 0.45;
@@ -2542,15 +2565,17 @@ function animate() {
         flow.transitProgress = Math.min(1, flow.transitProgress + delta / flow.transitDuration);
         const targetLocal = receiver.curve.getPointAt(flow.transitReverse ? 1 : 0);
         const targetWorld = receiver.container.localToWorld(targetLocal.clone());
+        const targetFamily = worldPointInFamily(targetWorld);
         const targetNormal = new THREE.Vector3(0, 0, 1)
           .applyQuaternion(receiver.container.getWorldQuaternion(new THREE.Quaternion())).normalize();
-        const control2 = targetWorld.clone().addScaledVector(targetNormal, flow.transitLift);
+        const targetNormalFamily = worldVectorInFamily(targetWorld, targetNormal).normalize();
+        const control2 = targetFamily.clone().addScaledVector(targetNormalFamily, flow.transitLift);
         const t = flow.transitProgress;
         const u = 1 - t;
         flow.bead.position.set(
-          u ** 3 * flow.transitStart.x + 3 * u ** 2 * t * flow.transitControl1.x + 3 * u * t ** 2 * control2.x + t ** 3 * targetWorld.x,
-          u ** 3 * flow.transitStart.y + 3 * u ** 2 * t * flow.transitControl1.y + 3 * u * t ** 2 * control2.y + t ** 3 * targetWorld.y,
-          u ** 3 * flow.transitStart.z + 3 * u ** 2 * t * flow.transitControl1.z + 3 * u * t ** 2 * control2.z + t ** 3 * targetWorld.z
+          u ** 3 * flow.transitStart.x + 3 * u ** 2 * t * flow.transitControl1.x + 3 * u * t ** 2 * control2.x + t ** 3 * targetFamily.x,
+          u ** 3 * flow.transitStart.y + 3 * u ** 2 * t * flow.transitControl1.y + 3 * u * t ** 2 * control2.y + t ** 3 * targetFamily.y,
+          u ** 3 * flow.transitStart.z + 3 * u ** 2 * t * flow.transitControl1.z + 3 * u * t ** 2 * control2.z + t ** 3 * targetFamily.z
         );
         if (flow.transitProgress >= 1) arriveAtReceivingChannel(flow);
       }
