@@ -1643,11 +1643,22 @@ function overlappingChartPairs() {
     return { person, x: screen.x, y: screen.y };
   });
   const pairs = [];
-  const maxDistance = 12;
+  const chartBounds = person => {
+    const isChild = familyChildren.some(child => child.id === person);
+    const scale = isChild ? familyLayout.childScale : familyLayout.parentScale;
+    return {
+      halfWidth: chartSilhouetteWidth * scale / 2,
+      halfHeight: chartViewHeight * scale / 2
+    };
+  };
   for (let i = 0; i < candidates.length; i++) {
     for (let j = i + 1; j < candidates.length; j++) {
       const a = candidates[i], b = candidates[j];
-      if (Math.hypot(a.x - b.x, a.y - b.y) <= maxDistance) pairs.push([a.person, b.person]);
+      const aBounds = chartBounds(a.person), bBounds = chartBounds(b.person);
+      if (
+        Math.abs(a.x - b.x) < aBounds.halfWidth + bBounds.halfWidth &&
+        Math.abs(a.y - b.y) < aBounds.halfHeight + bBounds.halfHeight
+      ) pairs.push([a.person, b.person]);
     }
   }
   return pairs;
