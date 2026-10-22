@@ -165,7 +165,7 @@ async function publishChildren(profiles) {
     .sort((a, b) => String(b.profile.birth_date || '').localeCompare(String(a.profile.birth_date || '')) || a.originalIndex - b.originalIndex);
   const children = await Promise.all(childProfiles.map(async ({ profile }, index) => {
     try {
-      return { id: `child-${index + 1}`, name: profile.name || `Child ${index + 1}`, ...await activeChart(profile) };
+      return { id: `child-${index + 1}`, name: profile.name || `Child ${index + 1}`, birthEpoch: epochFor(profile), ...await activeChart(profile) };
     } catch (error) {
       console.warn(`Skipping child chart for ${profile.name || `Child ${index + 1}`}:`, error.message);
       return null;

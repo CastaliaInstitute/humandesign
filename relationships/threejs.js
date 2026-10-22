@@ -1,7 +1,9 @@
 import * as THREE from 'three';
-import '../transit-data.js?family-circle-108-20261019&lifetime-ephem-range-20261020';
+import '../transit-data.js?family-circle-108-20261019&lifetime-channel-history-v2-20261020';
 import { generatePublicDemoReading } from './public-demo-readings.js?v=lifetime-timeline-20261020';
 import { publicPairRecurrence, publicFamilyRecurrence } from './relationship-recurrence-data.js?v=family-opportunities-20261020';
+import { relationshipChannelReadings } from './channel-guide.js?v=metheus-reading-20261020';
+import { buildPenta } from './penta.js?v=family-penta-20261020';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { SVGLoader } from 'three/addons/loaders/SVGLoader.js';
 
@@ -75,6 +77,7 @@ try {
   transitToggle.checked = true;
 }
 let sourceDocument = null;
+let featureDocument = null;
 let loader = null;
 let natalParentsReady = false;
 const gateDescriptions = new Map();
@@ -83,10 +86,12 @@ let rebuildTimer = null;
 let exactFrontAlignment = true;
 let frontPerson = 'daniel';
 let readingFrontPerson = null;
+let readingMode = 'family';
 let readingViewKey = '';
 const generatedReadings = new Map();
 const flowAnimations = [];
 const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+let channelFlowEnabled = true;
 let autoRotate = !reduceMotion;
 const autoRotateSpeed = 0.035; // radians per second; one slow turn takes about three minutes
 const colors = { daniel: new THREE.Color('#087fa5'), camille: new THREE.Color('#cf4f79') };
@@ -390,6 +395,8 @@ function frontFamilyReading() {
   const chartFacts = person => {
     const chartGates = gates.get(person) || gatesFor(person);
     const chartSummary = summarizeChart(chartGates, activations(person));
+    const definedCenterSet = new Set(chartSummary?.definedCenters || []);
+    const activatedCenterSet = new Set([...chartGates].map(gate => gateDescriptions.get(gate)?.center).filter(Boolean));
     const allTransitGates = new Set(transitSnapshot?.gates || []);
     const chartTransits = [...allTransitGates].filter(gate => !chartGates.has(gate));
     const transitChannelChanges = transitToggle.checked && transitSnapshot
@@ -400,7 +407,7 @@ function frontFamilyReading() {
         if (!transitGates.length || !(chartGates.has(from) || allTransitGates.has(from)) || !(chartGates.has(to) || allTransitGates.has(to)) || (chartGates.has(from) && chartGates.has(to))) return [];
         return [{
           channel: `${Math.min(from, to)}–${Math.max(from, to)}`,
-          channelName: relationshipChannelReadings[id]?.name || channelDescriptions.get(id)?.name || '',
+          channelName: channelDescriptions.get(id)?.name || relationshipChannelReadings[id]?.name || '',
           transitGates: transitGates.map(gate => ({ gate, planets: transitPlanetNames(gate), expectedThrough: transitGateWindow(gate) }))
         }];
       })
@@ -408,16 +415,101 @@ function frontFamilyReading() {
     return {
       id: person,
       name: personName(person),
+      role: person === 'daniel' || person === 'camille' ? 'parent' : 'child',
       type: chartSummary?.type,
       profile: chartSummary?.profile,
       authority: chartSummary?.authority,
       strategy: chartSummary?.strategy,
       natalGates: [...chartGates].sort((a, b) => a - b),
       definedCenters: chartSummary?.definedCenters || [],
-      openCenters: allCenterIds.filter(center => !(chartSummary?.definedCenters || []).includes(center)),
+      undefinedCenters: allCenterIds.filter(center => !definedCenterSet.has(center) && activatedCenterSet.has(center)),
+      fullyOpenCenters: allCenterIds.filter(center => !definedCenterSet.has(center) && !activatedCenterSet.has(center)),
       natalChannels: chartSummary?.definedChannels || [],
+      gateDetails: [...chartGates].sort((a, b) => a - b).map(gate => ({
+        gate,
+        name: gateDescriptions.get(gate)?.name || '',
+        description: gateDescriptions.get(gate)?.description || '',
+        center: gateDescriptions.get(gate)?.center || ''
+      })),
+      natalChannelDetails: [...sourceDocument.querySelectorAll('.person--daniel .channel-group[data-from][data-to]')].flatMap(node => {
+        const from = +node.dataset.from, to = +node.dataset.to;
+        if (!chartGates.has(from) || !chartGates.has(to)) return [];
+        const id = `${Math.min(from, to)}-${Math.max(from, to)}`;
+        const guide = channelDescriptions.get(id) || relationshipChannelReadings[id];
+        return [{
+          channel: id,
+          name: guide?.name || '',
+          description: guide?.description || '',
+          gates: [from, to].map(gate => ({ gate, name: gateDescriptions.get(gate)?.name || '' }))
+        }];
+      }),
       transitChannelChanges,
       transitGates: chartTransits.map(gate => ({ gate, planets: transitPlanetNames(gate), expectedThrough: transitGateWindow(gate) }))
+    };
+  };
+  const relationshipFacts = (personA, personB) => {
+    const gatesA = gates.get(personA) || gatesFor(personA);
+    const gatesB = gates.get(personB) || gatesFor(personB);
+    const summaryA = summarizeChart(gatesA, activations(personA));
+    const summaryB = summarizeChart(gatesB, activations(personB));
+    const combined = summarizeChart(new Set([...gatesA, ...gatesB]), [...activations(personA), ...activations(personB)]);
+    const natalPairCenters = new Set(combined?.definedCenters || []);
+    const transitSet = new Set(transitToggle.checked ? transitSnapshot?.gates || [] : []);
+    const withTransit = summarizeChart(new Set([...gatesA, ...gatesB, ...transitSet]), [...activations(personA), ...activations(personB)]);
+    const centersA = new Set(summaryA?.definedCenters || []);
+    const centersB = new Set(summaryB?.definedCenters || []);
+    const centersTogether = new Set(combined?.definedCenters || []);
+    const activatedA = new Set([...gatesA].map(gate => gateDescriptions.get(gate)?.center).filter(Boolean));
+    const activatedB = new Set([...gatesB].map(gate => gateDescriptions.get(gate)?.center).filter(Boolean));
+    const nameA = personName(personA), nameB = personName(personB);
+    const roleA = personA === 'daniel' || personA === 'camille' ? 'parent' : 'child';
+    const roleB = personB === 'daniel' || personB === 'camille' ? 'parent' : 'child';
+    const relationshipType = roleA === 'parent' && roleB === 'parent' ? 'parent-parent' : roleA === 'child' && roleB === 'child' ? 'child-child' : 'parent-child';
+    const natalBridges = [...sourceDocument.querySelectorAll('.person--daniel .channel-group[data-from][data-to]')].flatMap(node => {
+      const from = +node.dataset.from, to = +node.dataset.to;
+      if (!(gatesA.has(from) || gatesB.has(from)) || !(gatesA.has(to) || gatesB.has(to))) return [];
+      if ((gatesA.has(from) && gatesA.has(to)) || (gatesB.has(from) && gatesB.has(to))) return [];
+      const fromOwners = [ ...(gatesA.has(from) ? [nameA] : []), ...(gatesB.has(from) ? [nameB] : []) ];
+      const toOwners = [ ...(gatesA.has(to) ? [nameA] : []), ...(gatesB.has(to) ? [nameB] : []) ];
+      if (!fromOwners.length || !toOwners.length || ![...fromOwners, ...toOwners].includes(nameA) || ![...fromOwners, ...toOwners].includes(nameB)) return [];
+      const id = `${Math.min(from, to)}-${Math.max(from, to)}`;
+      const guide = channelDescriptions.get(id) || relationshipChannelReadings[id];
+      return [{
+        channel: id,
+        connectionType: 'cross-chart natal bridge',
+        channelName: guide?.name || '',
+        channelDescription: guide?.description || '',
+        connectionMeaning: `${nameA} and ${nameB} complete this channel across their charts while together; this is a shared connection theme and does not change either person's natal definition.`,
+        gateContributions: [from, to].map(gate => ({
+          gate,
+          name: gateDescriptions.get(gate)?.name || '',
+          description: gateDescriptions.get(gate)?.description || '',
+          natalOwners: [ ...(gatesA.has(gate) ? [nameA] : []), ...(gatesB.has(gate) ? [nameB] : []) ],
+          transitPlanets: []
+        }))
+      }];
+    });
+    return {
+      relationshipType,
+      ...(relationshipType === 'parent-child' ? {
+        parent: roleA === 'parent' ? nameA : nameB,
+        child: roleA === 'child' ? nameA : nameB
+      } : {}),
+      centerDynamics: allCenterIds.map(center => ({
+        center,
+        firstDefined: centersA.has(center),
+        secondDefined: centersB.has(center),
+        definedInPair: centersTogether.has(center),
+        definedWithTransit: new Set(withTransit?.definedCenters || []).has(center),
+        firstState: centersA.has(center) ? 'defined' : activatedA.has(center) ? 'undefined with an activated gate' : 'fully open with no activated gate',
+        secondState: centersB.has(center) ? 'defined' : activatedB.has(center) ? 'undefined with an activated gate' : 'fully open with no activated gate',
+        relationship: centersA.has(center) && centersB.has(center) ? 'defined by both' :
+          centersA.has(center) ? `${nameA} defined; ${nameB} undefined` :
+            centersB.has(center) ? `${nameB} defined; ${nameA} undefined` :
+              centersTogether.has(center) ? 'defined only by the pair' : 'undefined in both and in the pair'
+      })),
+      natalBridges,
+      transitDefinedCenters: allCenterIds.filter(center => new Set(withTransit?.definedCenters || []).has(center) && !natalPairCenters.has(center))
     };
   };
   const transitGateSet = new Set(transitToggle.checked ? transitSnapshot?.gates || [] : []);
@@ -432,16 +524,30 @@ function frontFamilyReading() {
       const hasRelationshipBridge = relationshipLinkSpecs(from, to, personA, personB, natalGates, transitGateSet).length > 0;
       const transitGates = [from, to].filter(gate => transitGateSet.has(gate) && !gatesA.has(gate) && !gatesB.has(gate));
       if (!hasRelationshipBridge || !transitGates.length) return [];
-      const reading = relationshipChannelReadings[channel] || channelDescriptions.get(channel);
+      const reading = channelDescriptions.get(channel) || relationshipChannelReadings[channel];
       const expectedThrough = transitGates.map(gate => `Gate ${gate} ${transitGateWindow(gate)}`).join('; ');
-      return [{ channel, channelName: reading?.name || '', channelDescription: reading?.description || '', expectedThrough }];
+      return [{
+        channel,
+        connectionType: 'transit-assisted relationship completion',
+        channelName: reading?.name || '',
+        channelDescription: reading?.description || '',
+        gateContributions: [from, to].map(gate => ({
+          gate,
+          name: gateDescriptions.get(gate)?.name || '',
+          natalOwners: [ ...(gatesA.has(gate) ? [personName(personA)] : []), ...(gatesB.has(gate) ? [personName(personB)] : []) ],
+          transitPlanets: transitGates.has(gate) ? transitPlanetNames(gate) : ''
+        })),
+        expectedThrough
+      }];
     });
   };
   const viewContext = {
     frontPerson: chartFacts(readingPerson),
     relationships: relationshipPairs.map(([a, b]) => {
       const pair = { ids: [a, b], people: [personName(a), personName(b)], charts: [chartFacts(a), chartFacts(b)] };
-      pair.transitChannelRecurrence = publicPairRecurrence(pair, activeTransitBridgeChannels(a, b));
+      Object.assign(pair, relationshipFacts(a, b));
+      pair.transitBridgeChannels = activeTransitBridgeChannels(a, b);
+      pair.transitChannelRecurrence = publicPairRecurrence(pair, pair.transitBridgeChannels.map(channel => channel.channel));
       return pair;
     }),
     transitsShown: Boolean(transitToggle.checked),
@@ -449,9 +555,54 @@ function frontFamilyReading() {
     transitEpoch: transitSnapshot ? transitSnapshot.epoch * 1000 : null,
     lifetimeTimeline: lifetimeTimelineActive
   };
+  viewContext.pentaMode = readingMode === 'penta';
+  viewContext.penta = buildPenta(familyPeople.map(person => ({
+    id: person,
+    name: personName(person),
+    role: person === 'daniel' || person === 'camille' ? 'parent' : 'child',
+    gates: [...(gates.get(person) || gatesFor(person))]
+  })));
   viewContext.familyRecurrence = publicFamilyRecurrence([viewContext.frontPerson, ...viewContext.relationships.map(pair => pair.charts[1])]);
   readingViewKey = JSON.stringify(viewContext);
   window.hdCurrentReadingView = viewContext;
+
+  const familyButton = document.querySelector('#showFamilyView');
+  const pentaButton = document.querySelector('#showPentaView');
+  familyButton?.setAttribute('aria-pressed', String(readingMode === 'family'));
+  pentaButton?.setAttribute('aria-pressed', String(readingMode === 'penta'));
+  const aiButton = document.querySelector('#generateFamilyReading');
+  if (aiButton) aiButton.textContent = readingMode === 'penta' ? '✦ AI Penta reading' : '✦ AI reading';
+  if (readingMode === 'penta') {
+    document.querySelector('#familyReading')?.style.setProperty('--chart-text-color', '#7864a6');
+    if (heading) heading.textContent = `Family Penta · ${viewContext.penta.memberCount} members`;
+    const intro = document.createElement('p');
+    intro.textContent = viewContext.penta.eligible
+      ? `This group layer reads how ${viewContext.penta.memberCount} family charts combine around practical roles, direction, memory, rhythm, resources, and shared experience. It summarizes natal gates only; it is not a fifth bodygraph.`
+      : `A Penta reading is intended for 3–5 people. This family group has ${viewContext.penta.memberCount} charts, so the Penta pattern is not available.`;
+    root.append(intro);
+    if (viewContext.penta.eligible) {
+      for (const channel of viewContext.penta.channels) {
+        const item = document.createElement('p');
+        const gateText = channel.gateContributions.map(({ gate, members }) => `Gate ${gate}: ${members.join(', ') || 'not contributed'}`).join('; ');
+        item.textContent = `${channel.channel} ${channel.name} — ${channel.function}. ${channel.complete ? `${channel.completion}; ${gateText}.` : `Incomplete in this family: ${gateText}.`}`;
+        appendReadingText(item, item.textContent);
+        root.append(item);
+      }
+      const gaps = viewContext.penta.gates.filter(item => !item.covered).map(item => item.gate);
+      const coverage = document.createElement('p');
+      coverage.textContent = `The family covers ${viewContext.penta.coveredGateCount} of 12 Penta gates and completes ${viewContext.penta.completeChannelCount} of 6 Penta channels in the group reading.${gaps.length ? ` Gates not represented are ${gaps.join(', ')}.` : ' All 12 gates are represented.'}`;
+      appendReadingText(coverage, coverage.textContent);
+      root.append(coverage);
+    }
+    const note = document.createElement('small');
+    note.textContent = 'Penta is a Human Design group framework for 3–5 people. These are reflective themes, not fixed roles or predictions.';
+    root.append(note);
+    readingViewKey = JSON.stringify(viewContext);
+    window.hdCurrentReadingView = viewContext;
+    const cached = generatedReadings.get(readingViewKey);
+    if (cached) renderAiReading(cached, familyPeople, personName);
+    return;
+  }
 
   const describeCenters = (centers, withThemes = false) => centers.map(center => {
     const [name, theme] = centerDescriptions[center] || [center, ''];
@@ -462,7 +613,7 @@ function frontFamilyReading() {
   const frontOpen = allCenterIds.filter(center => !frontDefined.has(center));
   const intro = document.createElement('p');
   const channelNames = summary.definedChannels.map(id => {
-    const reading = relationshipChannelReadings[id] || channelDescriptions.get(id);
+    const reading = channelDescriptions.get(id) || relationshipChannelReadings[id];
     return `${id.replace('-', '–')}${reading?.name ? ` ${reading.name}` : ''}`;
   });
   intro.textContent = `In front, ${frontName}'s ${summary.type}${summary.profile ? ` (${summary.profile})` : ''} chart has defined centers ${describeCenters([...frontDefined], true).join(', ') || 'none'}${channelNames.length ? ` through channels including ${channelNames.join(', ')}` : ''}. Its undefined (open) centers are ${describeCenters(frontOpen, true).join(', ') || 'none'}. In Human Design, definition is read as relatively consistent energy; an undefined center is more receptive to and can amplify other people's energy. Neither is better or worse, and the suggested strategy is to ${summary.strategy}.`;
@@ -475,7 +626,7 @@ function frontFamilyReading() {
   const channels = [...sourceDocument.querySelectorAll('.person--daniel .channel-group[data-from][data-to]')].map(channel => {
     const from = +channel.dataset.from, to = +channel.dataset.to;
     const id = `${Math.min(from, to)}-${Math.max(from, to)}`;
-    return { id, from, to, label: id.replace('-', '–'), reading: relationshipChannelReadings[id] || channelDescriptions.get(id) };
+    return { id, from, to, label: id.replace('-', '–'), reading: channelDescriptions.get(id) || relationshipChannelReadings[id] };
   });
   if (transitToggle.checked && transitSnapshot) {
     const combined = new Set([...natalFrontGates, ...transitGates]);
@@ -547,11 +698,15 @@ function frontFamilyReading() {
       const descriptions = complementary.map(channel => {
         const fromOwner = gatesA.has(channel.from) ? nameA : nameB;
         const toOwner = gatesA.has(channel.to) ? nameA : nameB;
-        const title = channel.reading?.name ? ` (${channel.reading.name})` : '';
+        const fromMeaning = gateDescriptions.get(channel.from);
+        const toMeaning = gateDescriptions.get(channel.to);
+        const fromLabel = `Gate ${channel.from}${fromMeaning?.name ? ` (${fromMeaning.name})` : ''}`;
+        const toLabel = `Gate ${channel.to}${toMeaning?.name ? ` (${toMeaning.name})` : ''}`;
+        const title = channel.reading?.name ? ` ${channel.reading.name}` : '';
         const channelTheme = channel.reading?.description?.replace(/[.!?]+$/, '');
-        return `the ${channel.label}${title} channel links ${fromOwner}'s Gate ${channel.from} with ${toOwner}'s Gate ${channel.to}${channelTheme ? `, bringing ${channelTheme.charAt(0).toLowerCase()}${channelTheme.slice(1)}` : ''}`;
+        return `${fromOwner}'s hanging ${fromLabel} pairs with ${toOwner}'s ${toLabel}, completing the ${channel.label}${title} channel in their connection${channelTheme ? `, whose theme is ${channelTheme.charAt(0).toLowerCase()}${channelTheme.slice(1)}` : ''}`;
       });
-      facts.push(`${nameA} and ${nameB} complete ${descriptions.join('; ')}`);
+      facts.push(`${descriptions.join('; ')}. In Human Design terms, this can create a shared channel dynamic while they are together; it does not change either person's natal chart definition`);
     }
     if (sharedChannels.length) facts.push(`Both charts also define ${sharedChannels.map(channel => `${channel.label}${channel.reading?.name ? ` ${channel.reading.name}` : ''}`).join(', ')} individually, reinforcing a shared channel theme`);
     if (sharedGates.length) facts.push(`They share gates ${sharedGates.join(', ')}, adding common activation themes`);
@@ -599,6 +754,21 @@ function frontFamilyReading() {
     }
   }
 }
+document.querySelector('#showFamilyView')?.addEventListener('click', () => {
+  readingMode = 'family';
+  frontFamilyReading();
+});
+document.querySelector('#showPentaView')?.addEventListener('click', () => {
+  readingMode = 'penta';
+  frontFamilyReading();
+});
+document.querySelector('#toggleChannelFlow')?.addEventListener('click', event => {
+  channelFlowEnabled = !channelFlowEnabled;
+  const button = event.currentTarget;
+  button.setAttribute('aria-pressed', String(channelFlowEnabled));
+  button.textContent = `Flow · ${channelFlowEnabled ? 'On' : 'Off'}`;
+  for (const flow of flowAnimations) flow.bead.visible = channelFlowEnabled;
+});
 document.querySelector('#generateFamilyReading')?.addEventListener('click', async event => {
   const button = event.currentTarget;
   const root = document.querySelector('#familyReadingBody');
@@ -636,44 +806,6 @@ document.querySelector('#generateFamilyReading')?.addEventListener('click', asyn
 controls.addEventListener('change', refreshFrontFamilyReading);
 const pale = new THREE.Color('#fffcf5');
 const gray = new THREE.Color('#96928a');
-const relationshipChannelReadings = {
-  '47-64': { name: 'Abstraction', description: 'Past images and experiences may feel confusing at first, then settle into a story or meaning with time.' },
-  '24-61': { name: 'Awareness', description: 'A private pull toward life’s mysteries can circle through the mind until an insight arrives; it may not yield a tidy answer on demand.' },
-  '4-63': { name: 'Logic', description: 'Doubt and questioning can become hypotheses or practical answers that are tested against evidence.' },
-  '23-43': { name: 'Structuring', description: 'An unusual insight can be put into plain words; timing and willingness to hear it affect how it lands.' },
-  '17-62': { name: 'Acceptance', description: 'Patterns and opinions can be organized into specific details and explained clearly.' },
-  '11-56': { name: 'Curiosity', description: 'Ideas become stimulation and stories: experiences can be shared for interest and perspective, rather than as fixed facts.' },
-  '1-8': { name: 'Inspiration', description: 'Distinctive self-expression can contribute something original and encourage others through example.' },
-  '7-31': { name: 'Alpha', description: 'Direction for a group can find a voice when others recognize and invite that leadership.' },
-  '13-33': { name: 'The Prodigal', description: 'Listening and remembering experiences can be followed by privacy, reflection, and sharing the story at the right time.' },
-  '10-20': { name: 'Awakening', description: 'Self-directed behavior is expressed in the present moment; the theme is living what feels true, here and now.' },
-  '21-45': { name: 'Money', description: 'Managing resources and gathering material support meet questions of stewardship, ownership, and who speaks for the group.' },
-  '12-22': { name: 'Openness', description: 'Emotional mood shapes expression and social openness; the voice may be available at some moments and quiet at others.' },
-  '35-36': { name: 'Transitoriness', description: 'Desire for change meets emotional experience: new experiences can bring growth, uncertainty, and lessons learned by living through them.' },
-  '16-48': { name: 'Wavelength', description: 'Depth becomes skill through practice, and practiced skill finds a way to be expressed.' },
-  '20-57': { name: 'Brainwave', description: 'Intuitive awareness can be voiced in the moment as a spontaneous sense of what is happening now.' },
-  '20-34': { name: 'Charisma', description: 'Sacral energy can move directly into action in the present when there is a genuine response and energy to act.' },
-  '10-34': { name: 'Exploration', description: 'Personal power is expressed through behavior that follows one’s own nature; action becomes a way of discovering the self.' },
-  '2-14': { name: 'The Beat', description: 'Resources and life-force can support a sense of direction, helping energy move toward work that feels aligned.' },
-  '5-15': { name: 'Rhythm', description: 'Fixed rhythms meet the full range of human pace and extremes; coordination works best when each person’s natural timing is respected.' },
-  '29-46': { name: 'Discovery', description: 'Commitment opens the way to embodied experience; discernment about what to say yes to matters.' },
-  '10-57': { name: 'Perfected Form', description: 'Present-moment intuition can guide behavior toward what feels correct and supportive of wellbeing.' },
-  '25-51': { name: 'Initiation', description: 'Openness to experience meets shock or challenge; surprising moments can awaken courage and shift perspective.' },
-  '37-40': { name: 'Community', description: 'Care, loyalty, and shared agreements meet willpower and contribution; clear reciprocity and time to rest matter.' },
-  '26-44': { name: 'Surrender', description: 'Recognition of patterns from the past can combine with persuasive transmission to support the group’s material needs.' },
-  '3-60': { name: 'Mutation', description: 'New beginnings emerge in pulses within real limits; progress may come in irregular bursts rather than a steady line.' },
-  '9-52': { name: 'Concentration', description: 'Stillness and focused attention can hold energy on details long enough for sustained work.' },
-  '42-53': { name: 'Maturation', description: 'Beginnings and growth form cycles: development includes staying with a process through its stages and completion.' },
-  '34-57': { name: 'Power', description: 'Instinctive awareness can guide powerful, immediate action; listening to the body’s present signal is central.' },
-  '27-50': { name: 'Preservation', description: 'Care and nourishment meet values and responsibility, highlighting how a group sustains its members.' },
-  '6-59': { name: 'Intimacy', description: 'Breaking barriers can create closeness, while emotional friction helps define trust, boundaries, and intimacy.' },
-  '18-58': { name: 'Judgment', description: 'Vitality and a sense of what could improve meet correction; useful feedback depends on timing and receptivity.' },
-  '28-38': { name: 'Struggle', description: 'Resistance is energized by the search for purpose; effort feels worthwhile when it serves something meaningful.' },
-  '32-54': { name: 'Transformation', description: 'Ambition meets instinct for what can endure, bringing attention to which efforts have potential to grow.' },
-  '30-41': { name: 'Recognition', description: 'Imagination and desire can concentrate into the urge to begin an emotional experience and discover what it brings.' },
-  '39-55': { name: 'Emoting', description: 'Provocation can stir emotional spirit and mood; this individual current moves in waves and cannot be forced.' },
-  '19-49': { name: 'Synthesis', description: 'Sensitivity to needs meets principles and emotional boundaries, bringing questions of belonging, support, and change.' }
-};
 const centerDescriptions = {
   head: ['Head', 'Inspiration, questions, and mental pressure.'],
   ajna: ['Ajna', 'Conceptualizing, interpreting, and organizing ideas.'],
@@ -760,16 +892,16 @@ function dashedTubesFromCurve(curve, radius, material, dashLength = 7, gapLength
   }
   return meshes;
 }
-function addFlowMotion(target, curve, color, hover = null, reverse = false) {
-  if (reduceMotion || !curve) return;
+function addFlowMotion(target, curve, color, hover = null, reverse = false, size = 1, phaseOffset = 0) {
+  if (!curve) return;
   const bead = new THREE.Group();
   const glow = new THREE.Mesh(
-    new THREE.SphereGeometry(1.65, 12, 10),
+    new THREE.SphereGeometry(1.65 * size, 12, 10),
     new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.52, depthWrite: false, toneMapped: false })
   );
   const coreColor = new THREE.Color(color).lerp(new THREE.Color('#fffdf2'), 0.72);
   const core = new THREE.Mesh(
-    new THREE.SphereGeometry(0.95, 12, 10),
+    new THREE.SphereGeometry(0.95 * size, 12, 10),
     new THREE.MeshBasicMaterial({ color: coreColor, toneMapped: false })
   );
   glow.renderOrder = 5;
@@ -781,7 +913,8 @@ function addFlowMotion(target, curve, color, hover = null, reverse = false) {
     Object.assign(core.userData, hover);
   }
   target.add(bead);
-  flowAnimations.push({ bead, curve, reverse, phase: (flowAnimations.length * 0.381966) % 1, duration: 2.6 });
+  bead.visible = channelFlowEnabled;
+  flowAnimations.push({ bead, curve, reverse, phase: (flowAnimations.length * 0.381966 + phaseOffset) % 1, duration: 2.6 });
 }
 function outlineFromSubPath(target, subPath, material, z, hover = null) {
   // Sample the SVG curves directly. Passing these samples through a second
@@ -815,6 +948,29 @@ function activationDescription(activations = []) {
     return `${label}: ${planets.join(', ')}`;
   }).filter(Boolean).join('; ');
 }
+function channelForGate(gateNumber, doc) {
+  const featureSource = featureDocument || doc;
+  if (!featureSource) return null;
+  const gate = [...featureSource.querySelectorAll('.channel-group[data-from][data-to]')]
+    .find(channel => +channel.dataset.from === gateNumber || +channel.dataset.to === gateNumber);
+  if (!gate) return null;
+  const from = +gate.dataset.from, to = +gate.dataset.to;
+  const id = `${Math.min(from, to)}-${Math.max(from, to)}`;
+  const counterpart = from === gateNumber ? to : from;
+  return { node: gate, from, to, id, counterpart, reading: channelDescriptions.get(id) || relationshipChannelReadings[id] };
+}
+function gateCounterpartReading(gateNumber, doc) {
+  const pairing = channelForGate(gateNumber, doc);
+  if (!pairing) return '';
+  const counterpartMeaning = gateDescriptions.get(pairing.counterpart);
+  const counterpartNode = doc.querySelector(`.gate[data-gate="${pairing.counterpart}"]`);
+  const counterpartOpen = counterpartNode?.dataset.state !== 'closed';
+  const counterpartName = counterpartMeaning?.name ? ` · ${counterpartMeaning.name}` : '';
+  const counterpartDescription = counterpartMeaning?.description || 'its complementary gate theme';
+  const channelName = pairing.reading?.name ? ` · ${pairing.reading.name}` : '';
+  const channelDescription = pairing.reading?.description || 'Together the two gates form a channel with a shared theme.';
+  return ` Its counterpart is Gate ${pairing.counterpart}${counterpartName}: ${counterpartDescription}. Together they form Channel ${pairing.id.replace('-', '–')}${channelName}; ${channelDescription} The counterpart is currently ${counterpartOpen ? 'open' : 'active'} in this chart.`;
+}
 function describePathFeature(node, person, activationsByGate, transitSnapshot = null) {
   const owner = window.hdChartNames?.[person] || (person === 'daniel' ? 'Person 1' : 'Person 2');
   const gate = gateGroup(node);
@@ -827,10 +983,11 @@ function describePathFeature(node, person, activationsByGate, transitSnapshot = 
     const transitPlanets = transitSnapshot?.gatePlanets?.[number] || [];
     const key = `${person}:gate:${number}`;
     const meaning = gateDescriptions.get(number);
+    const doc = gate.ownerDocument || sourceDocument;
     const activation = activationDescription(activationsByGate.get(number));
     const activationNote = activation ? ` Planetary activations: ${activation}.` : '';
     const transitNote = transitPlanets.length ? ` Current transit activation: ${transitPlanets.join(', ')}.` : '';
-    return hoverInfo(key, `Gate ${number}${meaning?.name ? ` · ${meaning.name}` : ''}`, `${meaning?.description || 'A gate is one activation point in a channel.'} ${owner} · ${centerName} center · natal ${active ? 'active' : 'open'}${transitPlanets.length ? '; currently activated by transit' : ''}.${activationNote}${transitNote}`);
+    return hoverInfo(key, `Gate ${number}${meaning?.name ? ` · ${meaning.name}` : ''}`, `${meaning?.description || 'A gate is one activation point in a channel.'}${gateCounterpartReading(number, doc)} ${owner} · ${centerName} center · natal ${active ? 'active' : 'open'}${transitPlanets.length ? '; currently activated by transit' : ''}.${activationNote}${transitNote}`);
   }
   if (channel) {
     const channelId = `${Math.min(+channel.dataset.from, +channel.dataset.to)}-${Math.max(+channel.dataset.from, +channel.dataset.to)}`;
@@ -838,7 +995,17 @@ function describePathFeature(node, person, activationsByGate, transitSnapshot = 
     const circuit = channel.dataset.circuit || 'bodygraph';
     const complete = channel.dataset.defined === 'true';
     const key = `${person}:channel:${label}`;
-    const meaning = channelDescriptions.get(channelId);
+    const meaning = channelDescriptions.get(channelId) || relationshipChannelReadings[channelId];
+    const doc = channel.ownerDocument || sourceDocument;
+    const gateReading = [channel.dataset.from, channel.dataset.to].map(gateNumber => {
+      const gateMeaning = gateDescriptions.get(+gateNumber);
+      const gateName = gateMeaning?.name ? ` · ${gateMeaning.name}` : '';
+      return `Gate ${gateNumber}${gateName}: ${gateMeaning?.description || 'one side of this channel'}`;
+    });
+    const gateState = [channel.dataset.from, channel.dataset.to].map(gateNumber => {
+      const gateNode = doc?.querySelector(`.gate[data-gate="${gateNumber}"]`);
+      return `Gate ${gateNumber} is ${gateNode?.dataset.state === 'closed' ? 'active' : 'open'}`;
+    });
     const fromActivations = activationDescription(activationsByGate.get(+channel.dataset.from));
     const toActivations = activationDescription(activationsByGate.get(+channel.dataset.to));
     const gateActivations = [
@@ -846,7 +1013,7 @@ function describePathFeature(node, person, activationsByGate, transitSnapshot = 
       toActivations && `Gate ${channel.dataset.to}: ${toActivations}`
     ].filter(Boolean);
     const activationNote = gateActivations.length ? ` Planetary activations · ${gateActivations.join(' · ')}.` : '';
-    return hoverInfo(key, `Channel ${label}${meaning?.name ? ` · ${meaning.name}` : ''}`, `${meaning?.description || `${owner} · ${circuit} circuit.`} ${owner} · ${circuit} circuit · ${complete ? 'complete' : 'open'}.${activationNote}`);
+    return hoverInfo(key, `Channel ${label}${meaning?.name ? ` · ${meaning.name}` : ''}`, `${meaning?.description || `${owner} · ${circuit} circuit.`} Its two ends are ${gateReading.join('; ')}. Together, these counterparts carry the channel’s shared desire and theme. ${gateState.join('; ')}. ${owner} · ${circuit} circuit · ${complete ? 'complete' : 'open'}.${activationNote}`);
   }
   if (center) {
     const centerId = center.dataset.center || 'body';
@@ -918,6 +1085,7 @@ function makePlaneGroup(paths, person, sharedChannels, relationshipChannels, opt
     const isGateMarker = cls.includes('gate-marker');
     const isCenterShape = cls.includes('center-shape');
     const centerChannelCount = isCenterShape ? Number(center?.getAttribute('data-channel-count') || 0) : 0;
+    const centerActiveGateCount = isCenterShape ? Number(center?.getAttribute('data-active-gate-count') || 0) : 0;
     const channelId = channel ? `${Math.min(+channel.dataset.from, +channel.dataset.to)}-${Math.max(+channel.dataset.from, +channel.dataset.to)}` : null;
     const hover = describePathFeature(node, person, activationsByGate, options.transitSnapshot);
     if (hover && channelId && relationshipChannels.has(channelId)) hover.hoverKey = `relationship:channel:${channelId}`;
@@ -928,15 +1096,15 @@ function makePlaneGroup(paths, person, sharedChannels, relationshipChannels, opt
       const roadColor = color;
       // In exact front view, separate shared tracks by a few pixels so both
       // contributors remain visibly blue and pink instead of blending purple.
-      const opacity = active ? (exactFrontAlignment ? 0.46 : 0.78) : 0.10;
+      const opacity = active ? (exactFrontAlignment ? 0.46 : 0.78) : 0.045;
       const sharedOffset = exactFrontAlignment && active && sharedChannels.has(channelId) ? (person === 'daniel' ? -2.2 : 2.2) : 0;
       // Each SVG rail becomes a two-lane carriageway; the divider and dashed lane marks make the road legible in depth.
       const roadMat = lineMaterial(roadColor, opacity);
-      const laneMat = lineMaterial(pale, active ? (exactFrontAlignment ? 0.22 : 0.7) : 0.08);
+      const laneMat = lineMaterial(pale, active ? (exactFrontAlignment ? 0.22 : 0.7) : 0.035);
       for (const subPath of path.subPaths) {
         const rawPoints = subPath.getPoints(16);
         const points = sharedOffset ? offsetPathPoints(rawPoints, sharedOffset) : rawPoints;
-        const road = tubeFromPoints(points, active ? 1.75 : 0.62, roadMat, 2.4);
+        const road = tubeFromPoints(points, active ? 1.75 : 0.42, roadMat, 2.4);
         if (road) { if (hover) Object.assign(road.userData, hover); group.add(road); }
         if (active && points.length > 2) {
           const from = gatePoints.get(+channel.dataset.from);
@@ -969,11 +1137,11 @@ function makePlaneGroup(paths, person, sharedChannels, relationshipChannels, opt
       const gateFillColor = gateActivations.some(item => item.type === 'design')
         ? '#cf2943'
         : gateActivations.some(item => item.type === 'personality') ? '#24231f' : color;
-      const fillColor = isGateMarker ? (transitActive ? transitColor : gateActive ? gateFillColor : pale) : (centerChannelCount ? color : pale);
-      const centerTintBase = exactFrontAlignment ? 0.16 : 0.24;
-      const centerTintPerChannel = exactFrontAlignment ? 0.065 : 0.085;
-      const centerTint = centerChannelCount
-        ? Math.min(exactFrontAlignment ? 0.58 : 0.76, centerTintBase + centerChannelCount * centerTintPerChannel)
+      const fillColor = isGateMarker ? (transitActive ? transitColor : gateActive ? gateFillColor : pale) : (centerActiveGateCount ? color : pale);
+      const centerTintBase = exactFrontAlignment ? 0.12 : 0.18;
+      const centerTintPerGate = exactFrontAlignment ? 0.055 : 0.07;
+      const centerTint = centerActiveGateCount
+        ? Math.min(exactFrontAlignment ? 0.58 : 0.76, centerTintBase + centerActiveGateCount * centerTintPerGate)
         : 0.12;
       const fillOpacity = isCenterShape
         ? centerTint
@@ -1044,8 +1212,10 @@ function extractLayer(doc, person, gates) {
   });
   keep.querySelectorAll('.center').forEach(center => {
     const count = centerChannelCounts.get(center.dataset.center) || 0;
+    const activeGateCount = [...gateCenters].filter(([gate, centerId]) => centerId === center.dataset.center && gates.has(gate)).length;
     center.setAttribute('data-defined', String(count > 0));
     center.setAttribute('data-channel-count', String(count));
+    center.setAttribute('data-active-gate-count', String(activeGateCount));
   });
   svg.querySelectorAll('script,#gate-state-legend,#flow-control,#flow-direction-legend,#svg-tooltip').forEach(el => el.remove());
   svg.setAttribute('viewBox', '0 0 360 360');
@@ -1099,6 +1269,19 @@ function chartPointInFamily(point, person, localDepth = 0) {
     centerZ - Math.sin(facingYaw) * localX + Math.cos(facingYaw) * localZ
   );
 }
+function visibleFamilyPairs() {
+  if (!currentNatalGates) return [];
+  const people = Object.keys(currentNatalGates).filter(person => {
+    if (person === 'daniel') return planeGroups.daniel?.visible ?? true;
+    if (person === 'camille') return planeGroups.camille?.visible ?? true;
+    return familyGroups[person]?.visible ?? true;
+  });
+  const pairs = [];
+  for (let i = 0; i < people.length; i++) {
+    for (let j = i + 1; j < people.length; j++) pairs.push([people[i], people[j]]);
+  }
+  return pairs;
+}
 function overlappingChartPairs() {
   if (!currentNatalGates) return [];
   chartRoot.updateMatrixWorld(true);
@@ -1137,12 +1320,12 @@ function refreshRelationshipPairing() {
   for (let i = flowAnimations.length - 1; i >= 0; i--) {
     if (!flowAnimations[i].bead.parent) flowAnimations.splice(i, 1);
   }
-  relationshipGroup = makeRelationshipGroup(currentChartData, currentNatalGates, currentTransitSnapshot, pairs);
+  relationshipGroup = makeRelationshipGroup(currentChartData, currentNatalGates, currentTransitSnapshot, visibleFamilyPairs());
   chartRoot.add(relationshipGroup);
   relationshipGroup.visible = document.querySelector('#showBridges').checked;
   if (pairChanged) {
     const names = pairs.map(pair => pair.map(person => window.hdChartNames?.[person] || (person === 'daniel' ? 'Person 1' : person === 'camille' ? 'Person 2' : 'Child')).join('–'));
-    setStatus(`${relationshipGroup.userData.bridgeCount} relationship channel bridge${relationshipGroup.userData.bridgeCount === 1 ? '' : 's'} between overlapping charts${names.length ? ` (${names.join(', ')})` : ''}.`);
+    setStatus(`${relationshipGroup.userData.bridgeCount} active family channel exchange${relationshipGroup.userData.bridgeCount === 1 ? '' : 's'}${names.length ? ` · currently aligned: ${names.join(', ')}` : ''}.`);
     frontFamilyReading();
   }
 }
@@ -1180,6 +1363,7 @@ function makeRelationshipGroup(chartData, natalGates, transitSnapshot, pairs = [
   const transitPurple = lineMaterial(new THREE.Color('#7c3aed'), 0.95);
   const transitGates = new Set(transitSnapshot?.gates || []);
   const people = Object.keys(chartData);
+  const overlappingKeys = new Set(overlappingChartPairs().map(pair => [...pair].sort().join(':')));
   const gatePoints = Object.fromEntries(people.map(person => [person, getGatePoints(chartData[person].paths)]));
   const personNames = Object.fromEntries(people.map(person => [person, window.hdChartNames?.[person] || (person === 'daniel' ? 'Person 1' : person === 'camille' ? 'Person 2' : 'Child')]));
   const gateMarkerMaterial = (person, gate) => natalGates[person]?.has(gate) ? materialFor(person) : transitPurple;
@@ -1202,9 +1386,10 @@ function makeRelationshipGroup(chartData, natalGates, transitSnapshot, pairs = [
         const a = +channel.dataset.from, b = +channel.dataset.to;
         const specs = relationshipLinkSpecs(a, b, personA, personB, natalGates, transitGates);
         if (!specs.length) continue;
+        const pairOverlaps = overlappingKeys.has([personA, personB].sort().join(':'));
         bridgeCount++;
         const channelId = `${Math.min(a, b)}-${Math.max(a, b)}`;
-        const reading = relationshipChannelReadings[channelId] || channelDescriptions.get(channelId);
+        const reading = channelDescriptions.get(channelId) || relationshipChannelReadings[channelId];
         const title = `${personNames[personA]} ↔ ${personNames[personB]} · channel ${a}–${b}${reading?.name ? ` · ${reading.name}` : ''}`;
         const links = specs.map(spec => {
           const from = gatePoints[spec.fromPerson]?.get(spec.fromGate);
@@ -1218,8 +1403,14 @@ function makeRelationshipGroup(chartData, natalGates, transitSnapshot, pairs = [
           };
         });
         const contributors = links.map(link => `${gateSourceDescription(link.fromPerson, link.fromGate)} ↔ ${gateSourceDescription(link.toPerson, link.toGate)}`);
+        const counterpartThemes = [a, b].map(gate => {
+          const gateMeaning = gateDescriptions.get(gate);
+          return `Gate ${gate}${gateMeaning?.name ? ` · ${gateMeaning.name}` : ''}: ${gateMeaning?.description || 'one contribution to the shared channel'}`;
+        });
         const detail = [
           reading?.description || 'These two gates join the connected centers in the Human Design BodyGraph.',
+          `The counterpart ends are ${counterpartThemes.join('; ')}. Their shared channel theme is the way these two qualities work together.`,
+          `This bridge completes the channel across ${personNames[personA]} and ${personNames[personB]}'s charts while they are together; it describes a shared connection dynamic, not a change to either person's natal definition.`,
           `Family bridge between ${personNames[personA]} and ${personNames[personB]} · ${contributors.join(' · ')}. Dashed bridges include at least one transit gate; a channel completed only by the shared transit sky is not counted.`
         ].join(' ');
         const tip = hoverInfo(`relationship:channel:${channelId}`, title, detail);
@@ -1244,16 +1435,21 @@ function makeRelationshipGroup(chartData, natalGates, transitSnapshot, pairs = [
             return familyPoint.addScaledVector(startDelta, 1 - t).addScaledVector(endDelta, t);
           });
           const spline = new THREE.CatmullRomCurve3(points, false, 'centripetal');
-          const transitContributed = !natalGates[link.fromPerson].has(link.fromGate) || !natalGates[link.toPerson].has(link.toGate);
-          const bridges = transitContributed
-            ? dashedTubesFromCurve(spline, 1.25, relationshipTeal)
-            : [new THREE.Mesh(new THREE.TubeGeometry(spline, 96, 1.25, 6, false), relationshipTeal)];
-          for (const bridge of bridges) {
-            Object.assign(bridge.userData, tip);
-            group.add(bridge);
+          if (pairOverlaps) {
+            const transitContributed = !natalGates[link.fromPerson].has(link.fromGate) || !natalGates[link.toPerson].has(link.toGate);
+            const bridges = transitContributed
+              ? dashedTubesFromCurve(spline, 1.25, relationshipTeal)
+              : [new THREE.Mesh(new THREE.TubeGeometry(spline, 96, 1.25, 6, false), relationshipTeal)];
+            for (const bridge of bridges) {
+              Object.assign(bridge.userData, tip);
+              group.add(bridge);
+            }
           }
-          addFlowMotion(group, spline, '#8fe3d7', tip);
-          addFlowMotion(group, spline, '#66bfe2', tip, true);
+          // One-way streams follow the gate completion direction. Stagger a pair
+          // of bright chart-colored particles so cross-family movement is easy to see.
+          const exchangeColor = chartColor(link.fromPerson).getStyle();
+          addFlowMotion(group, spline, exchangeColor, tip, false, 1.35, 0);
+          addFlowMotion(group, spline, exchangeColor, tip, false, 1.35, 0.5);
           for (const [point, material] of [[link.from, link.fromMaterial], [link.to, link.toMaterial]]) {
             const bead = new THREE.Mesh(new THREE.SphereGeometry(2.3, 10, 8), material);
             bead.position.copy(point);
@@ -1283,7 +1479,7 @@ function makeTransitGroup(data, snapshot, natalGates, person) {
     const from = +channel.dataset.from, to = +channel.dataset.to;
     if (!activeGates.has(from) || !activeGates.has(to) || (!transitGates.has(from) && !transitGates.has(to)) || !path.subPaths?.length) continue;
     const channelId = `${Math.min(from, to)}-${Math.max(from, to)}`;
-    const reading = relationshipChannelReadings[channelId] || channelDescriptions.get(channelId);
+    const reading = channelDescriptions.get(channelId) || relationshipChannelReadings[channelId];
     const gateSource = gate => {
       const parts = [];
       if (transitGates.has(gate)) parts.push(`transit: ${snapshot.gatePlanets[gate]?.join(', ') || 'planetary activation'}`);
@@ -1331,9 +1527,10 @@ function rebuildRelationship() {
   if (planeGroups.daniel) planeGroups.daniel.visible = document.querySelector('#showDaniel').checked;
   if (planeGroups.camille) planeGroups.camille.visible = document.querySelector('#showCamille').checked;
   const overlapPairs = overlappingChartPairs();
+  const exchangePairs = visibleFamilyPairs();
   const relationshipChannels = new Set();
   const channelElements = [...sourceDocument.querySelectorAll('.person--daniel .channel-group[data-from][data-to]')];
-  for (const [personA, personB] of overlapPairs) {
+  for (const [personA, personB] of exchangePairs) {
       for (const channel of channelElements) {
         const a = +channel.dataset.from, b = +channel.dataset.to;
         if (relationshipLinkSpecs(a, b, personA, personB, natalGates, transitGates).length) {
@@ -1425,7 +1622,7 @@ function rebuildRelationship() {
   currentTransitSnapshot = activeTransitSnapshot;
   releaseGroup(relationshipGroup);
   activeRelationshipPairKey = overlapPairs.map(pair => pair.join(':')).sort().join('|');
-  relationshipGroup = makeRelationshipGroup(chartData, natalGates, activeTransitSnapshot, overlapPairs);
+  relationshipGroup = makeRelationshipGroup(chartData, natalGates, activeTransitSnapshot, exchangePairs);
   chartRoot.add(relationshipGroup);
   relationshipGroup.visible = document.querySelector('#showBridges').checked;
   planeGroups.daniel.visible = document.querySelector('#showDaniel').checked;
@@ -1849,12 +2046,13 @@ canvas.addEventListener('click', event => {
 });
 
 function loadFeatureDescriptions(svgDocument) {
+  featureDocument = svgDocument;
   for (const gate of svgDocument.querySelectorAll('.gate[data-gate]')) {
-    const tooltip = gate.dataset.tooltip || '';
+    const tooltip = gate.dataset.tooltip || gate.getAttribute('aria-label') || '';
     const separator = tooltip.indexOf(':');
     const name = separator >= 0 ? tooltip.slice(0, separator).trim() : '';
     const description = gate.dataset.reading || (separator >= 0 ? tooltip.slice(separator + 1).trim() : 'A gate is one activation point in a channel.');
-    gateDescriptions.set(+gate.dataset.gate, { name, description });
+    gateDescriptions.set(+gate.dataset.gate, { name, description, center: gate.dataset.center || '' });
   }
   for (const channel of svgDocument.querySelectorAll('.channel-group[data-from][data-to]')) {
     const id = `${Math.min(+channel.dataset.from, +channel.dataset.to)}-${Math.max(+channel.dataset.from, +channel.dataset.to)}`;
@@ -1983,6 +2181,8 @@ function animate() {
   rotationReadout.textContent = `Rotation ${Math.round(THREE.MathUtils.radToDeg(angle))}°`;
   const elapsed = now / 1000;
   for (const flow of flowAnimations) {
+    flow.bead.visible = channelFlowEnabled;
+    if (!channelFlowEnabled) continue;
     const progress = (elapsed / flow.duration + flow.phase) % 1;
     flow.bead.position.copy(flow.curve.getPointAt(flow.reverse ? 1 - progress : progress));
   }
