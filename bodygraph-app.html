@@ -15,14 +15,46 @@
     :root,html,body{width:100%;height:100%;margin:0;background:#000;overflow:hidden}
     body{padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);box-sizing:border-box}
     iframe{display:block;width:100%;height:100%;border:0;background:#000}
+    #info-panel{position:fixed;z-index:2;left:max(12px,env(safe-area-inset-left));right:max(12px,env(safe-area-inset-right));bottom:max(12px,env(safe-area-inset-bottom));max-height:min(32vh,240px);overflow:auto;box-sizing:border-box;padding:12px 42px 12px 14px;border:1px solid #f5a742;border-radius:6px;background:rgba(39,41,35,.97);color:#fff9ed;font:14px/1.4 system-ui,sans-serif;box-shadow:0 4px 24px #0009;display:none;overscroll-behavior:contain}
+    #info-panel.is-visible{display:block}
+    #info-title{font-weight:650;color:#ffd18a;margin:0 0 5px}
+    #info-detail{margin:0;white-space:pre-wrap}
+    #info-close{position:absolute;right:8px;top:7px;width:28px;height:28px;border:0;border-radius:50%;background:#ffffff18;color:#fff;font:20px/1 system-ui;cursor:pointer}
+    @media(max-width:600px){#info-panel{font-size:13px;max-height:28vh;padding:10px 40px 10px 12px}}
   </style>
 </head>
 <body>
   <iframe id="bodygraph" title="Interactive Human Design BodyGraph"></iframe>
+  <section id="info-panel" aria-live="polite" aria-hidden="true" aria-label="Selected BodyGraph information">
+    <button id="info-close" type="button" aria-label="Close information panel">×</button>
+    <h2 id="info-title"></h2>
+    <p id="info-detail"></p>
+  </section>
   <script>
     const params = new URLSearchParams(location.search);
     const chart = params.get('chart') || params.get('person');
-    document.querySelector('#bodygraph').src = '/bodygraph.svg' + (chart ? '?chart=' + encodeURIComponent(chart) : '');
+    const frame = document.querySelector('#bodygraph');
+    const panel = document.querySelector('#info-panel');
+    const title = document.querySelector('#info-title');
+    const detail = document.querySelector('#info-detail');
+    function hideInfo() {
+      panel.classList.remove('is-visible');
+      panel.setAttribute('aria-hidden', 'true');
+    }
+    function dismissInfo() {
+      hideInfo();
+      frame.contentWindow?.postMessage({ type: 'bodygraph-info-dismiss' }, '*');
+    }
+    window.addEventListener('message', event => {
+      if (event.source !== frame.contentWindow || event.data?.type !== 'bodygraph-info') return;
+      if (event.data.action === 'hide') { hideInfo(); return; }
+      title.textContent = event.data.title || 'BodyGraph';
+      detail.textContent = event.data.detail || '';
+      panel.classList.add('is-visible');
+      panel.setAttribute('aria-hidden', 'false');
+    });
+    document.querySelector('#info-close').addEventListener('click', dismissInfo);
+    frame.src = '/bodygraph.svg' + (chart ? '?chart=' + encodeURIComponent(chart) : '');
   </script>
 </body>
 </html>
