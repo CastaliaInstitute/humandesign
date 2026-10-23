@@ -19,6 +19,11 @@
     #info-panel.is-visible{display:block}
     #info-title{font-weight:650;color:#ffd18a;margin:0 0 5px}
     #info-detail{margin:0;white-space:pre-wrap}
+    #planet-comparison{margin-top:9px}
+    #planet-comparison h3{margin:0 0 4px;color:#ffd18a;font-size:12px;font-weight:650}
+    #planet-comparison table{width:100%;border-collapse:collapse;font-size:12px;line-height:1.3;text-align:left}
+    #planet-comparison th,#planet-comparison td{padding:3px 8px 3px 0;border-top:1px solid #ffffff25;vertical-align:top}
+    #planet-comparison th{color:#c9c3b6;font-weight:550}
     #info-close{position:absolute;right:8px;top:7px;width:28px;height:28px;border:0;border-radius:50%;background:#ffffff18;color:#fff;font:20px/1 system-ui;cursor:pointer}
     @media(max-width:600px){#info-panel{font-size:13px;max-height:28vh;padding:10px 40px 10px 12px}}
   </style>
@@ -29,6 +34,13 @@
     <button id="info-close" type="button" aria-label="Close information panel">×</button>
     <h2 id="info-title"></h2>
     <p id="info-detail"></p>
+    <div id="planet-comparison" hidden>
+      <h3>Same-planet activations</h3>
+      <table>
+        <thead><tr><th>Gate</th><th>Name</th><th>Planet</th><th>Side</th></tr></thead>
+        <tbody id="planet-rows"></tbody>
+      </table>
+    </div>
   </section>
   <script>
     const params = new URLSearchParams(location.search);
@@ -37,6 +49,8 @@
     const panel = document.querySelector('#info-panel');
     const title = document.querySelector('#info-title');
     const detail = document.querySelector('#info-detail');
+    const planetComparison = document.querySelector('#planet-comparison');
+    const planetRows = document.querySelector('#planet-rows');
     function hideInfo() {
       panel.classList.remove('is-visible');
       panel.setAttribute('aria-hidden', 'true');
@@ -50,6 +64,21 @@
       if (event.data.action === 'hide') { hideInfo(); return; }
       title.textContent = event.data.title || 'BodyGraph';
       detail.textContent = event.data.detail || '';
+      planetRows.replaceChildren();
+      const rows = Array.isArray(event.data.planetPairs) ? event.data.planetPairs.flatMap(pair => [
+        { gate: pair.personality.gate, name: pair.personality.name, planet: pair.planet, side: 'Personality' },
+        { gate: pair.design.gate, name: pair.design.name, planet: pair.planet, side: 'Design' }
+      ]) : [];
+      rows.forEach(row => {
+        const tr = document.createElement('tr');
+        [row.gate, row.name, row.planet, row.side].forEach(value => {
+          const td = document.createElement('td');
+          td.textContent = value;
+          tr.append(td);
+        });
+        planetRows.append(tr);
+      });
+      planetComparison.hidden = rows.length === 0;
       panel.classList.add('is-visible');
       panel.setAttribute('aria-hidden', 'false');
     });
