@@ -74,10 +74,16 @@ scene.add(ambientParticles);
 let familyAzimuth = THREE.MathUtils.degToRad(108);
 chartRoot.rotation.y = familyAzimuth;
 function rotateFamily(step) {
+  engageRelationship();
   familyAzimuth += step;
   chartRoot.rotation.y = familyAzimuth;
   syncChartFacing();
   refreshFrontFamilyReading();
+}
+function engageRelationship() {
+  if (relationshipInteractionEnabled) return;
+  relationshipInteractionEnabled = true;
+  if (sourceDocument && loader && natalParentsReady) rebuildRelationship();
 }
 const planeGroups = {};
 // Double-clicking a chart temporarily removes its relationship connections.
@@ -99,6 +105,7 @@ const familyGroups = {};
 let familyChildren = [];
 const hangingFlexAnimations = [];
 const includedFamilyMembers = new Set(['daniel', 'camille']);
+let relationshipInteractionEnabled = false;
 let transitSnapshot = null;
 let transitDurationEstimates = [];
 let lifetimeTimelineActive = false;
@@ -2057,6 +2064,8 @@ function rebuildRelationship() {
     setStatus('Calculating parent natal charts…');
     return;
   }
+  const separation = Number(document.querySelector('#separation').value);
+  familyLayout.parentRadius = separation / 2;
   clearChartInitials();
   clearCenterParticleAnimations();
   flowAnimations.length = 0;
@@ -2081,7 +2090,7 @@ function rebuildRelationship() {
   currentNatalGates = natalGates;
   if (planeGroups.daniel) planeGroups.daniel.visible = document.querySelector('#showDaniel').checked;
   if (planeGroups.camille) planeGroups.camille.visible = document.querySelector('#showCamille').checked;
-  const exchangePairs = familyPairsWithinReach()
+  const exchangePairs = (relationshipInteractionEnabled ? familyPairsWithinReach() : [])
     .filter(([a, b]) => !relationshipMutedCharts.has(a) && !relationshipMutedCharts.has(b));
   const relationshipChannels = new Set();
   const relationshipReachTargets = Object.fromEntries(Object.keys(natalGates).map(person => [person, new Map()]));
@@ -2122,7 +2131,6 @@ function rebuildRelationship() {
     releaseGroup(group);
     delete familyGroups[person];
   }
-  const separation = Number(document.querySelector('#separation').value);
   const half = separation / 2;
   // Keep the parent pair's shared center at the same radius as the children.
   familyLayout.parentRadius = half;
@@ -2208,6 +2216,7 @@ function rebuildRelationship() {
 }
 
 function soloFamilyMember(person) {
+  relationshipInteractionEnabled = true;
   includedFamilyMembers.clear();
   includedFamilyMembers.add(person);
   document.querySelector('#showDaniel').checked = person === 'daniel';
@@ -2233,6 +2242,7 @@ function renderFamilyMemberOptions() {
     checkbox.checked = includedFamilyMembers.has(child.id);
     checkbox.dataset.familyMember = child.id;
     checkbox.addEventListener('change', () => {
+      engageRelationship();
       if (checkbox.checked) includedFamilyMembers.add(child.id);
       else includedFamilyMembers.delete(child.id);
       if (familyGroups[child.id]) familyGroups[child.id].visible = checkbox.checked;
@@ -2527,6 +2537,7 @@ function fitCameraToFamily(rect = canvas.getBoundingClientRect()) {
   camera.updateProjectionMatrix();
 }
 function setSeparation(value) {
+  relationshipInteractionEnabled = true;
   const half = Number(value) / 2;
   familyLayout.parentRadius = half;
   if (planeGroups.daniel) planeGroups.daniel.position.z = frontPerson === 'daniel' ? half : -half;
@@ -2538,6 +2549,7 @@ function setSeparation(value) {
   }
 }
 function orient(mode) {
+  relationshipInteractionEnabled = true;
   exactFrontAlignment = mode !== 'edge';
   if (sourceDocument) rebuildRelationship();
   // Clear the prior angle lock so preset views and Reset can choose their angle.
@@ -2706,6 +2718,7 @@ canvas.addEventListener('pointermove', event => {
 canvas.addEventListener('pointerleave', event => { if (event.pointerType !== 'touch') clearHover(); });
 canvas.addEventListener('pointerdown', event => {
   pauseAutoRotate();
+  engageRelationship();
   if (event.pointerType !== 'touch') return;
   activeTouchPointers.add(event.pointerId);
   if (activeTouchPointers.size === 1 && !multiTouchGesture) {
@@ -2842,6 +2855,7 @@ document.querySelector('#separation').addEventListener('input', e => setSeparati
 for (const selector of ['#danielGates', '#camilleGates']) document.querySelector(selector).addEventListener('input', () => { clearTimeout(rebuildTimer); rebuildTimer = setTimeout(rebuildRelationship, 220); });
 document.querySelector('#showBridges').addEventListener('change', e => { if (relationshipGroup) relationshipGroup.visible = e.target.checked; });
 document.querySelector('#showDaniel').addEventListener('change', e => {
+  engageRelationship();
   if (e.target.checked) includedFamilyMembers.add('daniel');
   else includedFamilyMembers.delete('daniel');
   if (planeGroups.daniel) planeGroups.daniel.visible = e.target.checked;
@@ -2849,6 +2863,7 @@ document.querySelector('#showDaniel').addEventListener('change', e => {
   refreshFrontFamilyReading();
 });
 document.querySelector('#showCamille').addEventListener('change', e => {
+  engageRelationship();
   if (e.target.checked) includedFamilyMembers.add('camille');
   else includedFamilyMembers.delete('camille');
   if (planeGroups.camille) planeGroups.camille.visible = e.target.checked;
