@@ -1742,7 +1742,7 @@ function makePlaneGroup(paths, person, sharedChannels, relationshipChannels, opt
             tubeGroup, wall, core, route, chart: group, person, channelId,
             activeGate, openGate, activePoint, openPoint, reachTarget,
             phase: (phase % 13) * 0.37,
-            amplitude: 4 + (phase % 5) * 1.2,
+            amplitude: 8 + (phase % 5) * 2.2,
             duration: 2.7 + (phase % 7) * 0.23, reach: 0
           });
           continue;
