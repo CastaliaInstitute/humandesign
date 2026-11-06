@@ -3207,6 +3207,20 @@ transitToggle.addEventListener('change', e => {
   try { localStorage.setItem('castalia-hd-show-transits', String(e.target.checked)); }
   catch (error) { console.warn('Could not save transit visibility:', error); }
 });
+// Main-view checkboxes mirror the existing layer controls in both directions.
+for (const [selector, control] of [
+  ['#mainDesign', designActivationToggle],
+  ['#mainPersonality', personalityActivationToggle],
+  ['#mainTransits', transitToggle]
+]) {
+  const checkbox = document.querySelector(selector);
+  checkbox.checked = control.checked;
+  checkbox.addEventListener('change', () => {
+    control.checked = checkbox.checked;
+    control.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+  control.addEventListener('change', () => { checkbox.checked = control.checked; });
+}
 document.querySelector('#front').addEventListener('click', () => orient('front'));
 document.querySelector('#edge').addEventListener('click', () => orient('edge'));
 document.querySelector('#reset').addEventListener('click', () => orient('reset'));
