@@ -1986,10 +1986,10 @@ function makePlaneGroup(paths, person, sharedChannels, relationshipChannels, opt
           });
           continue;
         }
-        const centerline = points.map(point => new THREE.Vector3(point.x, point.y, 2.4));
+        const centerline = points.map(point => new THREE.Vector3(point.x, point.y, 3.3));
         for (const side of [-1, 1]) {
           const rail = channelSidePoints(centerline, side);
-          const road = tubeFromPoints(rail, active ? 0.48 : 0.25, roadMat, 2.4);
+          const road = tubeFromPoints(rail, active ? 0.48 : 0.25, roadMat, 3.3);
           if (road) {
             road.userData.channelWall = true;
             if (hover) Object.assign(road.userData, hover);
@@ -2008,7 +2008,7 @@ function makePlaneGroup(paths, person, sharedChannels, relationshipChannels, opt
           const from = gatePoints.get(+channel.dataset.from);
           const startsAtFrom = from && Math.hypot(rawPoints[0].x - from.x, rawPoints[0].y - from.y) <= Math.hypot(rawPoints[rawPoints.length - 1].x - from.x, rawPoints[rawPoints.length - 1].y - from.y);
           const flowCurve = new THREE.CatmullRomCurve3(
-            rawPoints.map(point => new THREE.Vector3(point.x, point.y, 3.3)), false, 'centripetal');
+            centerline, false, 'centripetal');
           for (const gateNumber of [channel.dataset.from, channel.dataset.to]) {
             const opening = gatePoints.get(+gateNumber);
             if (!opening) continue;
@@ -2180,7 +2180,7 @@ function getGatePoints(paths) {
     if (!gate || !path.subPaths?.length) continue;
     const points = path.subPaths[0].getPoints(20);
     if (!points.length) continue;
-    const center = points.reduce((sum, p) => ({ x: sum.x + p.x / points.length, y: sum.y + p.y / points.length }), { x: 0, y: 0 });
+    const center = { x: (Math.min(...points.map(p => p.x)) + Math.max(...points.map(p => p.x))) / 2, y: (Math.min(...points.map(p => p.y)) + Math.max(...points.map(p => p.y))) / 2 };
     result.set(+gate.dataset.gate, center);
   }
   return result;
@@ -2351,6 +2351,16 @@ function makeTransitGroup(data, snapshot, natalGates, person) {
         Object.assign(wall.userData, hover);
         group.add(wall);
       }
+    }
+    for (const gateNumber of [from, to]) {
+      const opening = gatePoints.get(gateNumber);
+      if (!opening) continue;
+      const ring = new THREE.Mesh(new THREE.RingGeometry(2.6, 3.3, 24),
+        new THREE.MeshBasicMaterial({ color, side: THREE.DoubleSide, depthTest: false, depthWrite: false }));
+      ring.position.set(opening.x, opening.y, 3.3);
+      ring.renderOrder = 8;
+      Object.assign(ring.userData, hover);
+      group.add(ring);
     }
     const flowCurve = new THREE.CatmullRomCurve3(centerline, false, 'centripetal');
     addFlowMotion(group, flowCurve, color.getStyle(), hover);
