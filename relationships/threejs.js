@@ -1856,7 +1856,6 @@ function makePlaneGroup(paths, person, sharedChannels, relationshipChannels, opt
               || centerShape?.style?.getPropertyValue('--chakra-color')
               || color;
           };
-          const sourceColor = colorForGate(channel.ownerSVGElement, activeGate);
           const sinkColor = colorForGate(sourceDocument?.documentElement, openGate);
           const activeGateNode = channel.ownerSVGElement?.querySelector(`.gate[data-gate="${activeGate}"]`);
           const activeGateTypes = new Set([
@@ -1868,8 +1867,9 @@ function makePlaneGroup(paths, person, sharedChannels, relationshipChannels, opt
             : activeGateTypes.has('design') ? 'design'
               : activeGateTypes.has('personality') ? 'personality' : 'untyped';
           const hangingAccent = hangingType === 'design' ? '#ff5968'
-            : hangingType === 'personality' ? '#f4f1e8'
+            : hangingType === 'personality' ? '#c0c7d2'
               : hangingType === 'both' ? '#c184ff' : '#eab64b';
+          const sourceColor = hangingType === 'untyped' ? colorForGate(channel.ownerSVGElement, activeGate) : hangingAccent;
           const reachTarget = options.relationshipReachTargets?.get(channelId) || null;
           const tubeGroup = new THREE.Group();
           hangingFlexContainer.add(tubeGroup);
