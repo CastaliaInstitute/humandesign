@@ -3773,22 +3773,29 @@ function animate() {
       if (magneticDistance > 0.001) {
         const direction = magneticDelta.multiplyScalar(1 / magneticDistance);
         const strength = target
-          ? Math.min(150, magneticDistance * 1.35) * (0.72 + 0.28 * Math.exp(-magneticDistance / 360))
+          ? Math.min(900, magneticDistance * 12)
           : Math.min(100, magneticDistance * 5.5);
         flex.tipVelocity.addScaledVector(direction, strength * delta);
         if (target) {
           const fieldCurl = direction.clone().cross(reachNormal);
           if (fieldCurl.lengthSq() > 0.001) {
             fieldCurl.normalize();
-            flex.tipVelocity.addScaledVector(fieldCurl, Math.sin(elapsed * 2.4 + flex.phase) * strength * 0.12 * delta);
+            flex.tipVelocity.addScaledVector(fieldCurl, Math.sin(elapsed * 2.4 + flex.phase) * strength * 0.025 * delta);
           }
         }
       }
-      flex.tipVelocity.multiplyScalar(Math.exp(-(target ? 2.2 : 5.2) * delta));
-      flex.tipVelocity.clampLength(0, target ? 190 : 90);
+      flex.tipVelocity.multiplyScalar(Math.exp(-(target ? 5.5 : 5.2) * delta));
+      flex.tipVelocity.clampLength(0, target ? 300 : 90);
       flex.tipPosition.addScaledVector(flex.tipVelocity, delta);
-      if (target && flex.tipPosition.distanceTo(target) < 6) {
+      if (target && flex.tipPosition.distanceTo(target) < 12) {
         flex.locked = true;
+        const counterpart = hangingFlexAnimations.find(other => other.person === flex.reachTarget.person
+          && other.channelId === flex.channelId && other.reachTarget?.person === flex.person);
+        if (counterpart) {
+          counterpart.locked = true;
+          counterpart.tipVelocity.set(0, 0, 0);
+          if (counterpart.lockKey) lockedRelationshipLinks.add(counterpart.lockKey);
+        }
         if (flex.lockKey) {
           lockedRelationshipLinks.add(flex.lockKey);
           lockedRelationshipPairs.add(relationshipPairKey(flex.person, flex.reachTarget.person));
@@ -3844,6 +3851,11 @@ function animate() {
         sideways.clampLength(0, forwardStep * 0.65);
         points[index].copy(points[index - 1]).addScaledVector(forward, forwardStep).add(sideways);
       }
+    }
+    if (target && flex.locked) {
+      // Both halves share the same straight axis and exact midpoint. Half
+      // the arc length of two independently bent curves does not meet.
+      points = Array.from({ length: 37 }, (_, index) => activeAnchor.clone().lerp(target, index / 36));
     }
     const fullChannelCurve = constrainedPolyline(points);
     const renderPoints = target
