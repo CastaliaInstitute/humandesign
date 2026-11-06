@@ -1623,8 +1623,11 @@ function addBodygraphSvgPlane(group, paths) {
   const svgRoot = paths.find(path => path.userData?.node)?.userData.node.ownerSVGElement;
   if (!svgRoot) return;
   const artwork = svgRoot.cloneNode(true);
-  artwork.querySelectorAll('.channel-group[data-family-hanging="true"]').forEach(channel => {
-    channel.querySelectorAll('.channel,.channel-core,.channel-highlight,.hanging-segments,.channel-open-ends').forEach(path => path.style.opacity = '0');
+  // The Three.js pass below draws every channel from its SVG path. Hide the
+  // rasterized channel strokes so defined channels are not painted twice.
+  artwork.querySelectorAll('.channel-group').forEach(channel => {
+    channel.querySelectorAll('.channel,.channel-core,.channel-highlight,.channel-flow,.channel-hit,.hanging-segments,.channel-open-ends')
+      .forEach(path => path.style.opacity = '0');
   });
   artwork.setAttribute('width', '360');
   artwork.setAttribute('height', String(chartFrameHeight));
@@ -1667,6 +1670,10 @@ function makePlaneGroup(paths, person, sharedChannels, relationshipChannels, opt
   const color = options.color || chartColor(person);
   const transitColor = new THREE.Color('#7c3aed');
   const transitGates = new Set(options.transitSnapshot?.gates || []);
+  // Use the same gate set that generated this person's extracted SVG. Reading
+  // marker attributes back from SVGLoader nodes is unreliable across SVG
+  // parsing/cloning and can invert the defined versus hanging classification.
+  const activeGates = options.activeGates || new Set();
   const planetaryActivations = options.activations || window.hdNatalPlanetaryActivations?.[person] || familyChildren.find(child => child.id === person)?.activations || [];
   const activationsByGate = new Map();
   for (const activation of planetaryActivations) {
@@ -1683,10 +1690,8 @@ function makePlaneGroup(paths, person, sharedChannels, relationshipChannels, opt
     const gate = gateGroup(node);
     const center = centerGroup(node);
     const cls = node.getAttribute('class') || '';
-    const fromGateNode = channel?.ownerSVGElement?.querySelector(`.gate[data-gate="${channel.dataset.from}"]`);
-    const toGateNode = channel?.ownerSVGElement?.querySelector(`.gate[data-gate="${channel.dataset.to}"]`);
-    const fromActive = fromGateNode?.getAttribute('data-state') === 'closed';
-    const toActive = toGateNode?.getAttribute('data-state') === 'closed';
+    const fromActive = Boolean(channel && activeGates.has(+channel.dataset.from));
+    const toActive = Boolean(channel && activeGates.has(+channel.dataset.to));
     const active = Boolean(channel && fromActive && toActive);
     const gateActive = gate?.getAttribute('data-state') === 'closed';
     const centerActive = center?.getAttribute('data-defined') === 'true';
@@ -1697,7 +1702,10 @@ function makePlaneGroup(paths, person, sharedChannels, relationshipChannels, opt
     const centerActiveGateCount = isCenterShape ? Number(center?.getAttribute('data-active-gate-count') || 0) : 0;
     const channelId = channel ? `${Math.min(+channel.dataset.from, +channel.dataset.to)}-${Math.max(+channel.dataset.from, +channel.dataset.to)}` : null;
     const hover = describePathFeature(node, person, activationsByGate, options.transitSnapshot);
-    if (hover && channelId && relationshipChannels.has(channelId)) hover.hoverKey = `relationship:channel:${channelId}`;
+    if (hover && channelId && relationshipChannels.has(channelId)) {
+      hover.hoverKey = `relationship:channel:${channelId}`;
+      hover.hoverTip.participantIds = [...(options.relationshipParticipants?.get(channelId) || [])];
+    }
 
     if (path.subPaths?.length && isChannel) {
       // Keep each person's channels tinted by their chart color, including
@@ -1981,6 +1989,12 @@ function visibleFamilyPairs() {
   }
   return pairs;
 }
+function familyMemberIsVisible(person) {
+  if (!includedFamilyMembers.has(person)) return false;
+  if (person === 'daniel') return planeGroups.daniel?.visible ?? true;
+  if (person === 'camille') return planeGroups.camille?.visible ?? true;
+  return familyGroups[person]?.visible ?? true;
+}
 function familyPairsWithinReach() {
   chartRoot.updateMatrixWorld(true);
   const centerFor = person => {
@@ -2144,6 +2158,7 @@ function rebuildRelationship() {
   const exchangePairs = (relationshipInteractionEnabled ? familyPairsWithinReach() : [])
     .filter(([a, b]) => !relationshipMutedCharts.has(a) && !relationshipMutedCharts.has(b));
   const relationshipChannels = new Set();
+  const relationshipParticipants = new Map();
   const relationshipReachTargets = Object.fromEntries(Object.keys(natalGates).map(person => [person, new Map()]));
   const channelElements = templateChannels('daniel');
   for (const [personA, personB] of exchangePairs) {
@@ -2154,6 +2169,9 @@ function rebuildRelationship() {
           relationshipChannels.add(`${Math.min(a, b)}-${Math.max(a, b)}`);
           const channelId = `${Math.min(a, b)}-${Math.max(a, b)}`;
           for (const spec of specs) {
+            if (!relationshipParticipants.has(channelId)) relationshipParticipants.set(channelId, new Set());
+            relationshipParticipants.get(channelId).add(spec.fromPerson);
+            relationshipParticipants.get(channelId).add(spec.toPerson);
             const addReachTarget = (person, activeGate, targetPerson, openGate) => {
               if (!natalGates[person]?.has(activeGate) || natalGates[person]?.has(openGate)) return;
               relationshipReachTargets[person].set(channelId, {
@@ -2175,6 +2193,8 @@ function rebuildRelationship() {
     releaseGroup(planeGroups[person]);
     const group = makePlaneGroup(data.paths, person, sharedChannels, relationshipChannels, {
       scale: familyLayout.parentScale, transitSnapshot: activeTransitSnapshot,
+      activeGates: natalGates[person],
+      relationshipParticipants,
       relationshipReachTargets: relationshipReachTargets[person]
     });
     group.position.z = person === frontPerson ? familyLayout.parentRadius : -familyLayout.parentRadius;
@@ -2235,6 +2255,8 @@ function rebuildRelationship() {
     const color = chartColor(child.id);
     const childGroup = makePlaneGroup(childData.paths, child.id, new Set(), relationshipChannels, {
       color, name: child.name, scale: childScale, flipX, transitSnapshot: activeTransitSnapshot,
+      activeGates: childGates,
+      relationshipParticipants,
       relationshipReachTargets: relationshipReachTargets[child.id]
     });
     childPosition.visible = includedFamilyMembers.has(child.id);
@@ -2714,6 +2736,14 @@ function renderTip(info) {
   const detail = document.createElement('span');
   detail.textContent = info.detail;
   tip.append(title, detail);
+  const visibleParticipants = [...new Set(info.participantIds || [])]
+    .filter(familyMemberIsVisible)
+    .map(person => window.hdChartNames?.[person] || (person === 'daniel' ? 'Person 1' : person === 'camille' ? 'Person 2' : familyChildren.find(child => child.id === person)?.name || person));
+  if (visibleParticipants.length) {
+    const participants = document.createElement('span');
+    participants.textContent = `Visible participants: ${visibleParticipants.join(' and ')}.`;
+    tip.append(participants);
+  }
   for (const prompt of info.questions || []) {
     const line = document.createElement('span');
     line.className = 'tip-question';
@@ -2942,6 +2972,8 @@ relationshipToggleButton.addEventListener('click', () => {
 });
 syncRelationshipToggleButton();
 document.querySelector('#showDaniel').addEventListener('change', e => {
+  selectedKey = null;
+  clearHover();
   engageRelationship();
   if (e.target.checked) includedFamilyMembers.add('daniel');
   else includedFamilyMembers.delete('daniel');
@@ -2950,6 +2982,8 @@ document.querySelector('#showDaniel').addEventListener('change', e => {
   refreshFrontFamilyReading();
 });
 document.querySelector('#showCamille').addEventListener('change', e => {
+  selectedKey = null;
+  clearHover();
   engageRelationship();
   if (e.target.checked) includedFamilyMembers.add('camille');
   else includedFamilyMembers.delete('camille');
