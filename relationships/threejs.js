@@ -54,7 +54,7 @@ const ambientParticles = new THREE.Points(
   new THREE.BufferGeometry(),
   new THREE.PointsMaterial({ color: '#8bd8ff', size: 1.25, transparent: true, opacity: 0.28, depthWrite: false, sizeAttenuation: true })
 );
-const ambientParticleCount = 280;
+const ambientParticleCount = 420;
 const ambientParticlePositions = new Float32Array(ambientParticleCount * 3);
 const ambientParticleVelocities = new Float32Array(ambientParticleCount * 3);
 for (let i = 0; i < ambientParticleCount; i++) {
@@ -1418,7 +1418,7 @@ function addCenterParticleAnimations(group, paths) {
     const centerId = center.getAttribute('data-center') || 'center';
     const color = node.getAttribute('data-base-fill')
       || node.style?.getPropertyValue('--chakra-color') || '#8bd8ff';
-    const count = centerId === 'sacral' ? 12 : center.getAttribute('data-defined') === 'true' ? 2 : 1;
+    const count = centerId === 'sacral' ? 24 : center.getAttribute('data-defined') === 'true' ? 6 : 3;
     for (let index = 0; index < count; index++) {
       const bead = new THREE.Group();
       const tint = new THREE.Color(color);
@@ -3000,7 +3000,7 @@ function fitCameraToFamily(rect = canvas.getBoundingClientRect()) {
     for (const point of [
       { x: 180 - halfWidth, y: 0 }, { x: 180 + halfWidth, y: 0 },
       // Include the dynamically spread root center and its name tag below it.
-      { x: 180 - halfWidth, y: chartFrameHeight + 65 }, { x: 180 + halfWidth, y: chartFrameHeight + 65 }
+      { x: 180 - halfWidth, y: chartFrameHeight + 45 }, { x: 180 + halfWidth, y: chartFrameHeight + 45 }
     ]) {
       const world = chartRoot.localToWorld(chartPointInFamily(point, person));
       const relative = world.sub(controls.target);
@@ -3011,7 +3011,7 @@ function fitCameraToFamily(rect = canvas.getBoundingClientRect()) {
   // A solo chart should use the available viewport height, especially on
   // portrait screens. Family views retain extra framing for all visible charts.
   if (persons.length === 1) {
-    const fitHalfHeight = Math.max(projectedHalfHeight, projectedHalfWidth / aspect) * 1.08 + 4;
+    const fitHalfHeight = Math.max(projectedHalfHeight, projectedHalfWidth / aspect) * 1.01 + 1;
     const fitHalfWidth = fitHalfHeight * aspect;
     camera.left = -fitHalfWidth;
     camera.right = fitHalfWidth;
