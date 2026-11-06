@@ -191,6 +191,7 @@ const generatedReadings = new Map();
 const flowAnimations = [];
 const systemChannelRoutes = [];
 const centerParticleAnimations = [];
+const sacralEmitters = [];
 const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 let channelFlowEnabled = true;
 // Keep the solo chart still so the only visible structural motion is a
@@ -1420,20 +1421,7 @@ function seedCenterParticle(particle) {
   particle.age = 0;
   particle.escapeAt = 2.2 + Math.random() * 5.5;
 }
-function addCenterParticleAnimations(group, paths) {
-  for (const path of paths) {
-    const node = path.userData?.node;
-    if (!node?.getAttribute('class')?.split(/\s+/).includes('center-shape')) continue;
-    const center = node.closest('.center');
-    const shape = path.toShapes(true)[0];
-    if (!center || !shape) continue;
-    const polygon = shape.getPoints(32);
-    if (polygon.length < 3) continue;
-    const centerId = center.getAttribute('data-center') || 'center';
-    const color = node.getAttribute('data-base-fill')
-      || node.style?.getPropertyValue('--chakra-color') || '#8bd8ff';
-    const count = centerId === 'sacral' ? 24 : center.getAttribute('data-defined') === 'true' ? 6 : 3;
-    for (let index = 0; index < count; index++) {
+function spawnSystemParticle(group, polygon, centerId, color) {
       const bead = new THREE.Group();
       const tint = new THREE.Color(color);
       const glowMaterial = new THREE.MeshBasicMaterial({ color: tint, transparent: true, opacity: 0.42, depthWrite: false, toneMapped: false });
@@ -1454,10 +1442,29 @@ function addCenterParticleAnimations(group, paths) {
       centerParticleAnimations.push(particle);
       seedCenterParticle(particle);
       bead.visible = channelFlowEnabled;
+      return particle;
+}
+function addCenterParticleAnimations(group, paths) {
+  for (const path of paths) {
+    const node = path.userData?.node;
+    if (!node?.getAttribute('class')?.split(/\s+/).includes('center-shape')) continue;
+    const center = node.closest('.center');
+    const shape = path.toShapes(true)[0];
+    if (!center || !shape) continue;
+    const polygon = shape.getPoints(32);
+    if (polygon.length < 3) continue;
+    const centerId = center.getAttribute('data-center') || 'center';
+    const color = node.getAttribute('data-base-fill')
+      || node.style?.getPropertyValue('--chakra-color') || '#8bd8ff';
+    if (centerId === 'sacral') sacralEmitters.push({ group, polygon, color, elapsed: 0, particles: [] });
+    const count = centerId === 'sacral' ? 24 : center.getAttribute('data-defined') === 'true' ? 6 : 3;
+    for (let index = 0; index < count; index++) {
+      spawnSystemParticle(group, polygon, centerId, color);
     }
   }
 }
 function clearCenterParticleAnimations() {
+  sacralEmitters.length = 0;
   for (const particle of centerParticleAnimations) {
     particle.bead.removeFromParent();
     particle.bead.traverse(object => {
@@ -3873,7 +3880,29 @@ function animate() {
     flow.glow.scale.setScalar(pulse);
     flow.glowMaterial.opacity = 0.24 + pulse * 0.22;
   }
+  for (const emitter of sacralEmitters) {
+    if (!channelFlowEnabled || !familyMemberIsVisible(emitter.group.userData.chartPerson)) continue;
+    emitter.elapsed += delta;
+    if (emitter.elapsed < 0.25) continue;
+    emitter.elapsed %= 0.25;
+    let particle = emitter.particles.find(item => item.state === 'pooled');
+    if (!particle && emitter.particles.length < 96) {
+      particle = spawnSystemParticle(emitter.group, emitter.polygon, 'sacral', emitter.color);
+      particle.emitter = emitter;
+      emitter.particles.push(particle);
+    } else if (particle) {
+      particle.container = emitter.group;
+      particle.polygon = emitter.polygon.map(point => point.clone());
+      particle.centerId = 'sacral';
+      particle.chakraColor.set(emitter.color);
+      particle.glowMaterial.color.copy(particle.chakraColor);
+      particle.coreMaterial.color.copy(particle.chakraColor).lerp(new THREE.Color('#fffdf2'), 0.64);
+      particle.channelCooldown = 0;
+      seedCenterParticle(particle);
+    }
+  }
   for (const particle of centerParticleAnimations) {
+    if (particle.state === 'pooled') { particle.bead.visible = false; continue; }
     particle.bead.visible = channelFlowEnabled && particle.container.visible;
     if (!channelFlowEnabled) continue;
     if (particle.state === 'channel') {
@@ -3998,7 +4027,10 @@ function animate() {
       position.addScaledVector(velocity, delta);
       const fade = THREE.MathUtils.clamp((particle.escapeDuration - particle.age) / 2, 0, 1);
       particle.bead.scale.setScalar(fade * fade);
-      if (particle.age >= particle.escapeDuration) seedCenterParticle(particle);
+      if (particle.age >= particle.escapeDuration) {
+        if (particle.emitter) { particle.state = 'pooled'; particle.bead.visible = false; }
+        else seedCenterParticle(particle);
+      }
     }
     const pulse = 0.74 + 0.26 * Math.sin(elapsed * 4.6 + particle.age * 1.2);
     particle.glow.scale.setScalar(pulse);
