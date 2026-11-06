@@ -1902,6 +1902,49 @@ function makePlaneGroup(paths, person, sharedChannels, relationshipChannels, opt
     path.userData?.node?.getAttribute('class')?.split(/\s+/).includes('center-shape'))
     .flatMap(path => path.toShapes(true).map(shape => shape.getPoints(32)));
   const gatePoints = getGatePoints(paths);
+  // Mark the two edges of each active socket without filling its opening.
+  const socketGates = new Set();
+  for (const path of paths) {
+    const node = path.userData?.node;
+    const gate = node && gateGroup(node);
+    if (!gate || !node.classList.contains('gate-marker')) continue;
+    const number = Number(gate.dataset.gate);
+    if (socketGates.has(number)) continue;
+    socketGates.add(number);
+    const point = gatePoints.get(number);
+    if (!point) continue;
+    const types = gateActivationTypes(number);
+    const design = activeGates.has(number) && types.has('design') && activationVisibility.design !== false;
+    const personality = activeGates.has(number) && types.has('personality') && activationVisibility.personality !== false;
+    const transit = transitGates.has(number);
+    if (!design && !personality && !transit) continue;
+    const tint = design && personality ? '#c184ff' : design ? '#ff5968' : personality ? '#419dff' : '#c0c7d2';
+    const matchingChannel = paths.find(candidate => {
+      const element = candidate.userData?.node;
+      const channel = element && channelGroup(element);
+      return channel && element.classList.contains('channel') && candidate.subPaths?.length
+        && [Number(channel.dataset.from), Number(channel.dataset.to)].includes(number);
+    });
+    let tangent = new THREE.Vector3(0, 1, 0);
+    if (matchingChannel) {
+      const channel = channelGroup(matchingChannel.userData.node);
+      const samples = snapChannelEndpoints(matchingChannel.subPaths[0].getPoints(32), gatePoints, channel.dataset.from, channel.dataset.to);
+      if (Math.hypot(samples[0].x - point.x, samples[0].y - point.y) > Math.hypot(samples.at(-1).x - point.x, samples.at(-1).y - point.y)) samples.reverse();
+      tangent.set(samples[1].x - samples[0].x, samples[1].y - samples[0].y, 0).normalize();
+    }
+    const lateral = new THREE.Vector3(-tangent.y, tangent.x, 0);
+    const hover = describePathFeature(node, person, activationsByGate, options.transitSnapshot);
+    for (const side of [-1, 1]) {
+      const pixel = new THREE.Mesh(new THREE.PlaneGeometry(1.6, 1.6),
+        new THREE.MeshBasicMaterial({ color: tint, side: THREE.DoubleSide, depthTest: false, depthWrite: false, toneMapped: false }));
+      pixel.position.set(point.x, point.y, 4);
+      pixel.position.addScaledVector(lateral, side * 3);
+      pixel.userData.channelWall = true;
+      pixel.renderOrder = 12;
+      if (hover) Object.assign(pixel.userData, hover);
+      group.add(pixel);
+    }
+  }
   const renderedChannels = new Set();
   if (layersFor(person).allChannels) {
     const baseChannels = new Set();
