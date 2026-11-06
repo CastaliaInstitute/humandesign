@@ -91,7 +91,7 @@ const relationshipMutedCharts = new Set();
 const chartInitials = new Map();
 const personLayerSettings = new Map();
 function layersFor(person) {
-  if (!personLayerSettings.has(person)) personLayerSettings.set(person, { design: true, personality: true, transits: true });
+  if (!personLayerSettings.has(person)) personLayerSettings.set(person, { design: true, personality: true, transits: true, allChannels: true });
   return personLayerSettings.get(person);
 }
 let relationshipGroup = null;
@@ -266,7 +266,7 @@ function addChartInitial(person, initial, color) {
   layerControls.className = 'bodygraph-layer-controls';
   layerControls.setAttribute('role', 'group');
   layerControls.setAttribute('aria-label', (window.hdChartNames?.[person] || person) + ' activation layers');
-  for (const [key, title, tint] of [['design', 'Design', '#ff5968'], ['personality', 'Personality', '#419dff'], ['transits', 'Transits', '#c0c7d2']]) {
+  for (const [key, title, tint] of [['allChannels', 'All channels', '#888888'], ['design', 'Design', '#ff5968'], ['personality', 'Personality', '#419dff'], ['transits', 'Transits', '#c0c7d2']]) {
     const item = document.createElement('label');
     const input = document.createElement('input');
     input.type = 'checkbox';
@@ -1845,6 +1845,29 @@ function makePlaneGroup(paths, person, sharedChannels, relationshipChannels, opt
     .flatMap(path => path.toShapes(true).map(shape => shape.getPoints(32)));
   const gatePoints = getGatePoints(paths);
   const renderedChannels = new Set();
+  if (layersFor(person).allChannels) {
+    const baseChannels = new Set();
+    for (const path of paths) {
+      const node = path.userData?.node;
+      const channel = node && channelGroup(node);
+      if (!channel || !node.classList.contains('channel') || !path.subPaths?.length) continue;
+      const key = [Number(channel.dataset.from), Number(channel.dataset.to)].sort((a, b) => a - b).join('-');
+      if (baseChannels.has(key)) continue;
+      baseChannels.add(key);
+      const hover = describePathFeature(node, person, activationsByGate, options.transitSnapshot);
+      for (const subPath of path.subPaths) {
+        const points = snapChannelEndpoints(subPath.getPoints(32), gatePoints, channel.dataset.from, channel.dataset.to)
+          .map(point => new THREE.Vector3(point.x, point.y, 1.8));
+        for (const side of [-1, 1]) {
+          const wall = tubeFromPoints(channelSidePoints(points, side), 0.3, lineMaterial('#888888', 0.38), 1.8);
+          if (!wall) continue;
+          wall.userData.channelWall = true;
+          if (hover) Object.assign(wall.userData, hover);
+          group.add(wall);
+        }
+      }
+    }
+  }
   for (const path of paths) {
     const node = path.userData.node;
     if (!node) continue;
@@ -1891,6 +1914,7 @@ function makePlaneGroup(paths, person, sharedChannels, relationshipChannels, opt
       // Hanging is a per-channel gate state; a defined center does not stop
       // an unmatched active gate on that center from flexing.
       const hanging = channel?.dataset.defined !== 'true' && !active && fromActive !== toActive;
+      if (!active && !hanging) continue;
       const opacity = active ? (exactFrontAlignment ? 0.82 : 0.9) : hanging ? 0.48 : 0.13;
       const sharedOffset = exactFrontAlignment && active && sharedChannels.has(channelId) ? (person === 'daniel' ? -2.2 : 2.2) : 0;
       // Each SVG rail becomes a two-lane carriageway; the divider and dashed lane marks make the road legible in depth.
@@ -2876,7 +2900,6 @@ function fitCameraToFamily(rect = canvas.getBoundingClientRect()) {
     camera.right = fitHalfWidth;
     camera.top = fitHalfHeight;
     camera.bottom = -fitHalfHeight;
-    camera.zoom = 1;
     camera.updateProjectionMatrix();
     return;
   }
@@ -2892,7 +2915,6 @@ function fitCameraToFamily(rect = canvas.getBoundingClientRect()) {
   camera.right = fitHalfWidth;
   camera.top = fitHalfHeight;
   camera.bottom = -fitHalfHeight;
-  camera.zoom = 1;
   camera.updateProjectionMatrix();
 }
 function setSeparation(value) {
