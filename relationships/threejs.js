@@ -1837,6 +1837,7 @@ function addBodygraphSvgPlane(group, paths, activationVisibility = {}) {
     fill.style.setProperty('stroke', 'none', 'important');
     shape.before(fill);
     shape.style.setProperty('fill', 'none', 'important');
+    shape.style.setProperty('filter', 'none', 'important');
     const mask = document.createElementNS(svgNS, 'mask');
     const id = 'threejs-gate-openings-' + index;
     mask.id = id;
@@ -1859,7 +1860,8 @@ function addBodygraphSvgPlane(group, paths, activationVisibility = {}) {
         const otherMarker = other.querySelector('.gate-marker');
         return otherMarker ? Math.hypot(Number(otherMarker.getAttribute('cx')) - markerX, Number(otherMarker.getAttribute('cy')) - markerY) : Infinity;
       }));
-      const openingWidth = Math.max(0.6, Math.min(2, neighborDistance * 0.45));
+      const sacralBottom = center.dataset.center === 'sacral' && [42, 3, 9].includes(Number(gate.dataset.gate));
+      const openingWidth = Math.max(0.6, Math.min(sacralBottom ? 3.4 : 2, neighborDistance * 0.45));
       hole.setAttribute('r', String(openingWidth / 2));
       hole.setAttribute('fill', 'black');
       mask.append(hole);
@@ -1885,6 +1887,10 @@ function addBodygraphSvgPlane(group, paths, activationVisibility = {}) {
         const point = { x: a[0] + t * dx, y: a[1] + t * dy };
         const d = Math.hypot(point.x - x, point.y - y);
         if (d < distance) { nearest = point; distance = d; }
+      }
+      if (sacralBottom && shape.localName === 'rect') {
+        nearest = { x, y: Number(shape.getAttribute('y')) + Number(shape.getAttribute('height')) };
+        distance = Math.abs(nearest.y - y);
       }
       if (nearest) {
         const dx = (nearest.x - x) / (distance || 1), dy = (nearest.y - y) / (distance || 1);
