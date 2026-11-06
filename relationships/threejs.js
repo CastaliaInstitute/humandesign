@@ -61,6 +61,7 @@ const ambientParticles = new THREE.Points(
   new THREE.PointsMaterial({ color: '#8bd8ff', size: 1.25, transparent: true, opacity: 0.28, depthWrite: false, sizeAttenuation: true })
 );
 const ambientParticleCount = 420;
+let environmentalCloudSeeded = false;
 const ambientParticlePositions = new Float32Array(ambientParticleCount * 3);
 const ambientParticleVelocities = new Float32Array(ambientParticleCount * 3);
 for (let i = 0; i < ambientParticleCount; i++) {
@@ -1491,6 +1492,67 @@ function clearCenterParticleAnimations() {
     });
   }
   centerParticleAnimations.length = 0;
+}
+// Environmental motes become ordinary system particles at an inlet. The pool
+// bounds mesh count even during long sessions with many open gates.
+function ingestEnvironmentalParticle(inlet, world) {
+  const receiver = inlet.receiver;
+  let particle = centerParticleAnimations.find(item => item.environmental && item.state === 'pooled');
+  if (!particle) {
+    if (centerParticleAnimations.filter(item => item.environmental).length >= 80) return false;
+    particle = spawnSystemParticle(receiver.container, receiver.polygon, receiver.centerId, '#c0c7d2');
+    particle.environmental = true;
+  }
+  receiver.container.attach(particle.bead);
+  particle.container = receiver.container;
+  particle.polygon = receiver.polygon;
+  particle.centerId = receiver.centerId;
+  particle.bead.position.copy(receiver.container.worldToLocal(world.clone()));
+  particle.bead.scale.setScalar(1);
+  particle.age = 0;
+  particle.escapeAt = 4 + Math.random() * 4;
+  particle.channelCooldown = 2;
+  if (inlet.route) {
+    particle.channelRoute = { ...inlet.route, reverse: true };
+    particle.channelDistance = 0;
+    particle.state = 'channel';
+    particle.glowMaterial.color.set('#c0c7d2');
+    particle.coreMaterial.color.set('#eef2ff');
+  } else {
+    particle.chakraColor.copy(receiver.chakraColor);
+    particle.glowMaterial.color.copy(receiver.chakraColor);
+    particle.coreMaterial.color.copy(receiver.chakraColor).lerp(new THREE.Color('#fffdf2'), 0.64);
+    const center = receiver.polygon.reduce((sum, point) => sum.add(point), new THREE.Vector2()).multiplyScalar(1 / receiver.polygon.length);
+    particle.velocity.set(center.x - particle.bead.position.x, center.y - particle.bead.position.y, 0).normalize().multiplyScalar(9);
+    particle.bead.position.addScaledVector(particle.velocity, 0.55);
+    particle.bead.position.z = 5.2;
+    particle.state = 'plane';
+  }
+  return true;
+}
+function environmentalInlets() {
+  const inlets = [];
+  const centers = new Map();
+  for (const particle of centerParticleAnimations) {
+    const person = particle.container.userData.chartPerson;
+    if (!particle.environmental && familyMemberIsVisible(person)) centers.set(`${person}:${particle.centerId}`, particle);
+  }
+  for (const [person, points] of Object.entries(currentGatePoints)) {
+    if (!familyMemberIsVisible(person) || !layersFor(person).allChannels) continue;
+    for (const [gate, point] of points) {
+      if (currentNatalGates?.[person]?.has(gate)) continue;
+      const center = sourceDocument.querySelector(`.gate[data-gate="${gate}"]`)?.dataset.center;
+      const receiver = centers.get(`${person}:${center}`);
+      if (receiver) inlets.push({ receiver, world: receiver.container.localToWorld(new THREE.Vector3(point.x, point.y, 5.2)) });
+    }
+  }
+  for (const flex of hangingFlexAnimations) {
+    if (flex.locked || !flex.systemRoute || !familyMemberIsVisible(flex.person)) continue;
+    const receiver = centers.get(`${flex.person}:${flex.activeCenter}`);
+    if (receiver) inlets.push({ receiver, route: flex.systemRoute,
+      world: flex.systemRoute.container.localToWorld(flex.systemRoute.curve.getPointAt(1).clone()) });
+  }
+  return inlets;
 }
 function releaseCenterParticleInto3D(particle) {
   const parent = particle.bead.parent;
@@ -3902,8 +3964,39 @@ function animate() {
   }
   ambientParticles.rotation.y = elapsed * 0.006;
   const ambientPositions = ambientParticles.geometry.attributes.position.array;
+  const inlets = channelFlowEnabled ? environmentalInlets() : [];
+  ambientParticles.updateWorldMatrix(true, false);
+  const ambientWorld = new THREE.Vector3();
+  const ambientLocal = new THREE.Vector3();
+  if (inlets.length && !environmentalCloudSeeded) {
+    environmentalCloudSeeded = true;
+    for (let i = 0; i < ambientParticleCount / 2; i++) {
+      ambientLocal.copy(inlets[i % inlets.length].world).add(new THREE.Vector3(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).normalize().multiplyScalar(35 + Math.random() * 90));
+      ambientParticles.worldToLocal(ambientLocal).toArray(ambientPositions, i * 3);
+    }
+  }
   for (let i = 0; i < ambientParticleCount; i++) {
     const offset = i * 3;
+    ambientWorld.fromArray(ambientPositions, offset);
+    ambientParticles.localToWorld(ambientWorld);
+    let inlet = null, nearest = 120 * 120;
+    for (const candidate of inlets) {
+      const distance = ambientWorld.distanceToSquared(candidate.world);
+      if (distance < nearest) { nearest = distance; inlet = candidate; }
+    }
+    if (inlet) {
+      ambientLocal.copy(inlet.world);
+      ambientParticles.worldToLocal(ambientLocal);
+      ambientLocal.sub(new THREE.Vector3().fromArray(ambientPositions, offset)).normalize().multiplyScalar(36);
+      const blend = 1 - Math.exp(-delta * 3);
+      for (let axis = 0; axis < 3; axis++) ambientParticleVelocities[offset + axis] += (ambientLocal.getComponent(axis) - ambientParticleVelocities[offset + axis]) * blend;
+      if (nearest < 16 && ingestEnvironmentalParticle(inlet, ambientWorld)) {
+        // Replace the ingested environmental mote outside the attraction region.
+        ambientLocal.copy(inlet.world).add(new THREE.Vector3(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).normalize().multiplyScalar(100 + Math.random() * 60));
+        ambientParticles.worldToLocal(ambientLocal).toArray(ambientPositions, offset);
+      }
+    }
+
     const phase = elapsed * 0.08 + i * 0.17;
     ambientPositions[offset] += ambientParticleVelocities[offset] * delta + Math.sin(phase) * delta * 1.1;
     ambientPositions[offset + 1] += ambientParticleVelocities[offset + 1] * delta + Math.cos(phase * 0.7) * delta * 0.35;
@@ -4107,7 +4200,7 @@ function animate() {
       const fade = THREE.MathUtils.clamp((particle.escapeDuration - particle.age) / 2, 0, 1);
       particle.bead.scale.setScalar(fade * fade);
       if (particle.age >= particle.escapeDuration) {
-        if (particle.emitter) { particle.state = 'pooled'; particle.bead.visible = false; }
+        if (particle.emitter || particle.environmental) { particle.state = 'pooled'; particle.bead.visible = false; }
         else seedCenterParticle(particle);
       }
     }
