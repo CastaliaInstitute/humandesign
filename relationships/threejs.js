@@ -163,6 +163,20 @@ async function loadBodygraphTemplate(url) {
     await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
     const svg = frame.contentDocument?.documentElement;
     if (!svg || svg.localName !== 'svg') throw new Error('bodygraph.svg did not produce an SVG document');
+    // Capture gate locations in chakra-local coordinates while the SVG
+    // is mounted, including its vertical spacing and center transforms.
+    svg.querySelectorAll('.gate[data-center]').forEach(gate => {
+      const marker = gate.querySelector('.gate-marker');
+      const shape = svg.querySelector('.center[data-center="' + gate.dataset.center + '"] .center-shape');
+      const markerMatrix = marker?.getScreenCTM(), shapeMatrix = shape?.getScreenCTM();
+      if (!markerMatrix || !shapeMatrix) return;
+      const point = svg.createSVGPoint();
+      point.x = Number(marker.getAttribute('cx'));
+      point.y = Number(marker.getAttribute('cy'));
+      const local = point.matrixTransform(markerMatrix).matrixTransform(shapeMatrix.inverse());
+      gate.setAttribute('data-opening-x', String(local.x));
+      gate.setAttribute('data-opening-y', String(local.y));
+    });
     const parsed = new DOMParser().parseFromString(new XMLSerializer().serializeToString(svg), 'image/svg+xml');
     if (parsed.querySelector('parsererror')) throw new Error('bodygraph.svg layout could not be parsed');
     return parsed;
@@ -1850,8 +1864,8 @@ function addBodygraphSvgPlane(group, paths, activationVisibility = {}, transitGa
       const marker = gate.querySelector('.gate-marker');
       if (!marker?.hasAttribute('cx')) continue;
       const hole = document.createElementNS(svgNS, 'ellipse');
-      hole.setAttribute('cx', marker.getAttribute('cx'));
-      hole.setAttribute('cy', marker.getAttribute('cy'));
+      hole.setAttribute('cx', gate.getAttribute('data-opening-x') || marker.getAttribute('cx'));
+      hole.setAttribute('cy', gate.getAttribute('data-opening-y') || marker.getAttribute('cy'));
       const markerX = Number(marker.getAttribute('cx')), markerY = Number(marker.getAttribute('cy'));
       const neighborDistance = Math.min(...gates.filter(other => other !== gate).map(other => {
         const otherMarker = other.querySelector('.gate-marker');
@@ -1865,7 +1879,7 @@ function addBodygraphSvgPlane(group, paths, activationVisibility = {}, transitGa
       mask.append(hole);
       // Markers can sit inward from the outline (notably the throat).
       // Cut a short socket all the way through the nearest chakra boundary.
-      const x = Number(marker.getAttribute('cx')), y = Number(marker.getAttribute('cy'));
+      const x = Number(gate.getAttribute('data-opening-x') || marker.getAttribute('cx')), y = Number(gate.getAttribute('data-opening-y') || marker.getAttribute('cy'));
       // Work from XML attributes: detached SVG geometry APIs can throw
       // on Safari before the artwork has ever been attached to a document.
       let outline = [];
@@ -2317,36 +2331,6 @@ function extractLayer(doc, person, gates, activations = []) {
     if (!activationTypes.has(activation.gate)) activationTypes.set(activation.gate, new Set());
     if (type) activationTypes.get(activation.gate).add(type);
   }
-  keep.querySelectorAll('.gate[data-center]').forEach(gate => {
-    const marker = gate.querySelector('.gate-marker');
-    const shape = keep.querySelector('.center[data-center="' + gate.dataset.center + '"] .center-shape');
-    if (!marker?.hasAttribute('cx') || !shape) return;
-    const x = Number(marker.getAttribute('cx')), y = Number(marker.getAttribute('cy'));
-    let outline = [];
-    if (shape.localName === 'rect') {
-      const sx = Number(shape.getAttribute('x')), sy = Number(shape.getAttribute('y'));
-      const w = Number(shape.getAttribute('width')), h = Number(shape.getAttribute('height'));
-      outline = [[sx, sy], [sx + w, sy], [sx + w, sy + h], [sx, sy + h]];
-    } else {
-      const numbers = (shape.getAttribute('points') || shape.getAttribute('d') || '').match(/[-+]?(?:\d*\.)?\d+(?:e[-+]?\d+)?/gi)?.map(Number) || [];
-      for (let i = 0; i + 1 < numbers.length; i += 2) outline.push([numbers[i], numbers[i + 1]]);
-    }
-    let nearest = null, distance = Infinity;
-    for (let i = 0; i < outline.length; i++) {
-      const a = outline[i], b = outline[(i + 1) % outline.length];
-      const dx = b[0] - a[0], dy = b[1] - a[1];
-      const t = Math.max(0, Math.min(1, ((x - a[0]) * dx + (y - a[1]) * dy) / (dx * dx + dy * dy || 1)));
-      const point = { x: a[0] + t * dx, y: a[1] + t * dy };
-      const d = Math.hypot(point.x - x, point.y - y);
-      if (d < distance) { nearest = point; distance = d; }
-    }
-    if (!nearest) return;
-    gate.querySelectorAll('circle').forEach(circle => {
-      circle.setAttribute('cx', String(nearest.x));
-      circle.setAttribute('cy', String(nearest.y));
-    });
-    if (gate.hasAttribute('transform')) gate.setAttribute('transform', 'translate(' + nearest.x + ' 0) scale(0.7142857 1) translate(' + -nearest.x + ' 0)');
-  });
   keep.querySelectorAll('.gate').forEach(g => {
     const gate = +g.dataset.gate;
     g.setAttribute('data-state', gates.has(gate) ? 'closed' : 'open');
