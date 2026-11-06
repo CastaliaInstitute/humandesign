@@ -3005,10 +3005,10 @@ function chartAt(clientX, clientY) {
   }
   return null;
 }
-function positionTip(clientX, clientY) {
-  tip.style.left = `${Math.max(12, Math.min(clientX + 14, window.innerWidth - tip.offsetWidth - 12))}px`;
-  tip.style.top = `${Math.max(12, Math.min(clientY + 14, window.innerHeight - tip.offsetHeight - 12))}px`;
+function positionTip() {
+  // Tips occupy a reserved footer below the canvas rather than following the pointer.
 }
+
 canvas.addEventListener('pointermove', event => {
   // OrbitControls owns pointer moves during a drag; raycasting every chart
   // feature on those same high-frequency events can stall or exhaust the page.
