@@ -1647,9 +1647,53 @@ function snapChannelEndpoints(points, gatePoints, fromGate, toGate) {
     + Math.hypot(points.at(-1).x - from.x, points.at(-1).y - from.y);
   const start = direct <= reverse ? from : to;
   const end = direct <= reverse ? to : from;
-  const aligned = points.map(point => ({ x: point.x, y: point.y }));
-  aligned[0] = { x: start.x, y: start.y };
-  aligned[aligned.length - 1] = { x: end.x, y: end.y };
+  const key = fromGate + ':' + toGate + ':' + (direct <= reverse);
+  if (gatePoints.routes?.has(key)) return gatePoints.routes.get(key);
+  const polygons = gatePoints.obstacles || [];
+  const clear = (a, b) => {
+    const count = Math.max(12, Math.ceil(Math.hypot(b.x - a.x, b.y - a.y) / 1.5));
+    for (let i = 1; i < count; i++) {
+      const t = i / count;
+      if (polygons.some(polygon => pointInPolygon(a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t, polygon))) return false;
+    }
+    return true;
+  };
+  let route = [start, end];
+  if (!clear(start, end)) {
+    const nodes = [start, end];
+    for (const polygon of polygons) {
+      const center = polygon.reduce((sum, point) => ({ x: sum.x + point.x / polygon.length, y: sum.y + point.y / polygon.length }), { x: 0, y: 0 });
+      for (const point of polygon) {
+        const length = Math.hypot(point.x - center.x, point.y - center.y) || 1;
+        nodes.push({ x: point.x + (point.x - center.x) / length * 3, y: point.y + (point.y - center.y) / length * 3 });
+      }
+    }
+    const distances = nodes.map(() => Infinity), previous = nodes.map(() => -1), visited = new Set();
+    distances[0] = 0;
+    while (visited.size < nodes.length) {
+      let current = -1;
+      for (let i = 0; i < nodes.length; i++) if (!visited.has(i) && (current < 0 || distances[i] < distances[current])) current = i;
+      if (current < 0 || !Number.isFinite(distances[current]) || current === 1) break;
+      visited.add(current);
+      for (let i = 0; i < nodes.length; i++) {
+        if (visited.has(i)) continue;
+        const distance = distances[current] + Math.hypot(nodes[i].x - nodes[current].x, nodes[i].y - nodes[current].y);
+        if (distance < distances[i] && clear(nodes[current], nodes[i])) { distances[i] = distance; previous[i] = current; }
+      }
+    }
+    if (Number.isFinite(distances[1])) {
+      route = [];
+      for (let index = 1; index >= 0; index = previous[index]) route.unshift(nodes[index]);
+    }
+  }
+  // Dense linear samples keep later interpolation close to the clear route.
+  const aligned = [route[0]];
+  for (let i = 1; i < route.length; i++) {
+    const a = route[i - 1], b = route[i];
+    const count = Math.max(4, Math.ceil(Math.hypot(b.x - a.x, b.y - a.y) / 2));
+    for (let j = 1; j <= count; j++) aligned.push({ x: a.x + (b.x - a.x) * j / count, y: a.y + (b.y - a.y) * j / count });
+  }
+  gatePoints.routes?.set(key, aligned);
   return aligned;
 }
 function inquiryContext(key, title) {
@@ -2376,6 +2420,9 @@ function releaseGroup(group) {
 }
 function getGatePoints(paths) {
   const result = new Map();
+  result.obstacles = paths.filter(path => path.userData?.node?.classList.contains('center-shape'))
+    .flatMap(path => path.toShapes(true).map(shape => shape.getPoints(8)));
+  result.routes = new Map();
   for (const path of paths) {
     const node = path.userData.node;
     if (!node?.getAttribute('class')?.includes('gate-marker')) continue;
