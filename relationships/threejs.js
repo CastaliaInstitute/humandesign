@@ -1466,7 +1466,7 @@ function addCenterParticleAnimations(group, paths) {
         bead, glow, glowMaterial, coreMaterial, chakraColor: new THREE.Color(color), container: group, centerId,
         polygon: polygon.map(point => point.clone()), velocity: new THREE.Vector3(),
         state: 'plane', age: 0, escapeAt: 0, escapeVelocity: null,
-        escapeDuration: 1.2 + Math.random() * 1.2
+        escapeDuration: 8 + Math.random() * 4
       };
       centerParticleAnimations.push(particle);
       seedCenterParticle(particle);
@@ -1501,7 +1501,7 @@ function releaseCenterParticleInto3D(particle) {
   particle.bead.scale.setScalar(1);
   particle.state = 'escaped';
   particle.age = 0;
-  particle.escapeDuration = 0.75 + Math.random() * 0.45;
+  particle.escapeDuration = 8 + Math.random() * 4;
 }
 function releaseParticleInto3D(flow) {
   const parent = flow.bead.parent;
@@ -1546,7 +1546,7 @@ function releaseParticleInto3D(flow) {
   flow.escapeVelocity = worldVectorInObject(parent, worldPosition, worldVelocity);
   flow.state = 'escaped';
   flow.escapeAge = 0;
-  flow.escapeDuration = 0.8 + Math.random() * 0.45;
+  flow.escapeDuration = 8 + Math.random() * 4;
 }
 function findReceivingChannel(flow) {
   if (!flow.transport) return null;
@@ -3844,7 +3844,7 @@ function animate() {
       velocity.y -= delta * 0.45;
       velocity.multiplyScalar(Math.pow(0.94, delta));
       position.addScaledVector(velocity, delta);
-      const fade = THREE.MathUtils.clamp(1 - flow.escapeAge / flow.escapeDuration, 0, 1);
+      const fade = THREE.MathUtils.clamp((flow.escapeDuration - flow.escapeAge) / 2, 0, 1);
       flow.bead.scale.setScalar(fade * fade);
       if (flow.escapeAge >= flow.escapeDuration) recycleParticleIntoPlane(flow);
     }
@@ -3975,7 +3975,7 @@ function animate() {
       velocity.y -= delta * 0.35;
       velocity.multiplyScalar(Math.pow(0.95, delta));
       position.addScaledVector(velocity, delta);
-      const fade = THREE.MathUtils.clamp(1 - particle.age / particle.escapeDuration, 0, 1);
+      const fade = THREE.MathUtils.clamp((particle.escapeDuration - particle.age) / 2, 0, 1);
       particle.bead.scale.setScalar(fade * fade);
       if (particle.age >= particle.escapeDuration) seedCenterParticle(particle);
     }
