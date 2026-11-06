@@ -1835,7 +1835,7 @@ function addBodygraphSvgPlane(group, paths, activationVisibility = {}) {
     for (const gate of gates) {
       const marker = gate.querySelector('.gate-marker');
       if (!marker?.hasAttribute('cx')) continue;
-      const hole = document.createElementNS(svgNS, 'circle');
+      const hole = document.createElementNS(svgNS, 'ellipse');
       hole.setAttribute('cx', marker.getAttribute('cx'));
       hole.setAttribute('cy', marker.getAttribute('cy'));
       const markerX = Number(marker.getAttribute('cx')), markerY = Number(marker.getAttribute('cy'));
@@ -1845,7 +1845,8 @@ function addBodygraphSvgPlane(group, paths, activationVisibility = {}) {
       }));
       const sacralBottom = center.dataset.center === 'sacral' && [42, 3, 9].includes(Number(gate.dataset.gate));
       const openingWidth = channelClearWidth;
-      hole.setAttribute('r', String(openingWidth / 2));
+      hole.setAttribute('rx', String(openingWidth / 2 / 1.4));
+      hole.setAttribute('ry', String(openingWidth / 2));
       hole.setAttribute('fill', 'black');
       mask.append(hole);
       // Markers can sit inward from the outline (notably the throat).
@@ -1880,7 +1881,7 @@ function addBodygraphSvgPlane(group, paths, activationVisibility = {}) {
         const socket = document.createElementNS(svgNS, 'path');
         socket.setAttribute('d', 'M' + x + ',' + y + ' L' + (nearest.x + dx * 3) + ',' + (nearest.y + dy * 3));
         socket.setAttribute('stroke', 'black');
-        socket.setAttribute('stroke-width', String(openingWidth));
+        socket.setAttribute('stroke-width', String(openingWidth / (Math.hypot(1.4 * dy, dx) || 1)));
         socket.setAttribute('stroke-linecap', 'round');
         socket.setAttribute('fill', 'none');
         mask.append(socket);
