@@ -22,6 +22,12 @@ scene.background = new THREE.Color('#000000');
 const chartFrameHeight = 430;
 const chartSilhouetteWidth = 235;
 const parentChartScale = 0.9;
+// Shared physical dimensions for motes, channel interiors, and gate sockets.
+const particleRadius = 0.66;
+const channelClearWidth = particleRadius * 2 + 0.28;
+const channelWallRadius = 0.22;
+const channelWallOffset = channelClearWidth / 2 + channelWallRadius;
+
 // Orthographic projection keeps parallel chart planes the same apparent size,
 // which is essential for a mathematically exact front overlap.
 const camera = new THREE.OrthographicCamera(-300, 300, 300, -300, 1, 3000);
@@ -1223,7 +1229,7 @@ function channelSidePoints(points, side, normal = new THREE.Vector3(0, 0, 1)) {
       .sub(points[Math.max(0, index - 1)]).normalize();
     const lateral = normal.clone().cross(tangent);
     if (lateral.lengthSq() < 1e-6) lateral.set(1, 0, 0);
-    return point.clone().addScaledVector(lateral.normalize(), side * 2.6);
+    return point.clone().addScaledVector(lateral.normalize(), side * channelWallOffset);
   });
 }
 function separateHangingChannels(points, flex, neighbors) {
@@ -1323,29 +1329,6 @@ function updateDynamicTube(tube, points) {
   if (points.length < 2) return;
   const curve = constrainedPolyline(points);
   const { tubularSegments, radialSegments, radius, geometry } = tube;
-  if (!tube.stroke) {
-    const material = new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: tube.mesh.material.opacity, depthWrite: false, toneMapped: false });
-    const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute('position', new THREE.Float32BufferAttribute(new Float32Array((tubularSegments + 1) * 3), 3));
-    const colors = new Float32Array((tubularSegments + 1) * 3);
-    const original = tube.geometry.getAttribute('color');
-    for (let i = 0; i <= tubularSegments; i++) {
-      const index = i * (radialSegments + 1);
-      colors.set([original.getX(index), original.getY(index), original.getZ(index)], i * 3);
-    }
-    geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-    tube.stroke = new THREE.Line(geometry, material);
-    tube.stroke.userData = { ...tube.mesh.userData };
-    tube.mesh.add(tube.stroke);
-    tube.mesh.material.colorWrite = false;
-  }
-  const strokePositions = tube.stroke.geometry.getAttribute('position');
-  for (let i = 0; i <= tubularSegments; i++) {
-    const point = curve.getPointAt(i / tubularSegments);
-    strokePositions.setXYZ(i, point.x, point.y, point.z);
-  }
-  strokePositions.needsUpdate = true;
-  tube.stroke.geometry.computeBoundingSphere();
   const frames = curve.computeFrenetFrames(tubularSegments, false);
   const position = geometry.getAttribute('position');
   const point = new THREE.Vector3(), vertex = new THREE.Vector3();
@@ -1456,7 +1439,7 @@ function addCenterParticleAnimations(group, paths) {
       const glowMaterial = new THREE.MeshBasicMaterial({ color: tint, transparent: true, opacity: 0.42, depthWrite: false, toneMapped: false });
       const coreMaterial = new THREE.MeshBasicMaterial({ color: tint.clone().lerp(new THREE.Color('#fffdf2'), 0.64), toneMapped: false });
       const glow = new THREE.Mesh(new THREE.SphereGeometry(1.7, 8, 6), glowMaterial);
-      const core = new THREE.Mesh(new THREE.SphereGeometry(0.66, 8, 6), coreMaterial);
+      const core = new THREE.Mesh(new THREE.SphereGeometry(particleRadius, 8, 6), coreMaterial);
       glow.renderOrder = 5;
       core.renderOrder = 6;
       bead.add(glow, core);
@@ -1861,7 +1844,7 @@ function addBodygraphSvgPlane(group, paths, activationVisibility = {}) {
         return otherMarker ? Math.hypot(Number(otherMarker.getAttribute('cx')) - markerX, Number(otherMarker.getAttribute('cy')) - markerY) : Infinity;
       }));
       const sacralBottom = center.dataset.center === 'sacral' && [42, 3, 9].includes(Number(gate.dataset.gate));
-      const openingWidth = Math.max(0.6, Math.min(sacralBottom ? 3.4 : 2, neighborDistance * 0.45));
+      const openingWidth = channelClearWidth;
       hole.setAttribute('r', String(openingWidth / 2));
       hole.setAttribute('fill', 'black');
       mask.append(hole);
@@ -1998,10 +1981,10 @@ function makePlaneGroup(paths, person, sharedChannels, relationshipChannels, opt
     const lateral = new THREE.Vector3(-tangent.y, tangent.x, 0);
     const hover = describePathFeature(node, person, activationsByGate, options.transitSnapshot);
     for (const side of [-1, 1]) {
-      const pixel = new THREE.Mesh(new THREE.PlaneGeometry(1.6, 1.6),
+      const pixel = new THREE.Mesh(new THREE.PlaneGeometry(channelWallRadius * 2, channelWallRadius * 2),
         new THREE.MeshBasicMaterial({ color: tint, side: THREE.DoubleSide, depthTest: false, depthWrite: false, toneMapped: false }));
       pixel.position.set(point.x, point.y, 4);
-      pixel.position.addScaledVector(lateral, side * 3);
+      pixel.position.addScaledVector(lateral, side * channelWallOffset);
       pixel.userData.channelWall = true;
       pixel.renderOrder = 12;
       if (hover) Object.assign(pixel.userData, hover);
@@ -2142,7 +2125,7 @@ function makePlaneGroup(paths, person, sharedChannels, relationshipChannels, opt
           hangingFlexContainer.add(tubeGroup);
           if (hover) Object.assign(tubeGroup.userData, hover);
           const activationHalo = new THREE.Mesh(
-            new THREE.RingGeometry(2.1, 3.7, 24),
+            new THREE.RingGeometry(channelClearWidth / 2, channelClearWidth / 2 + channelWallRadius * 2, 24),
             new THREE.MeshBasicMaterial({
               color: hangingAccent, transparent: true, opacity: 0.96,
               blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
@@ -2152,8 +2135,8 @@ function makePlaneGroup(paths, person, sharedChannels, relationshipChannels, opt
           activationHalo.renderOrder = 7;
           activationHalo.name = `${hangingType} hanging gate marker`;
           tubeGroup.add(activationHalo);
-          const wall = createDynamicTube(0.48, 0.85, false, 36, 6, sourceColor, sinkColor);
-          const core = createDynamicTube(0.48, 0.85, false, 36, 6, sourceColor, sinkColor);
+          const wall = createDynamicTube(channelWallRadius, 0.85, false, 36, 6, sourceColor, sinkColor);
+          const core = createDynamicTube(channelWallRadius, 0.85, false, 36, 6, sourceColor, sinkColor);
           const particleSourceColor = new THREE.Color(sourceColor);
           const particleSinkColor = new THREE.Color(sinkColor);
           const flowParticles = [];
@@ -2180,7 +2163,7 @@ function makePlaneGroup(paths, person, sharedChannels, relationshipChannels, opt
         const centerline = points.map(point => new THREE.Vector3(point.x, point.y, 3.3));
         for (const side of [-1, 1]) {
           const rail = channelSidePoints(centerline, side);
-          const road = tubeFromPoints(rail, active ? 0.48 : 0.25, roadMat, 3.3);
+          const road = tubeFromPoints(rail, active ? channelWallRadius : 0.15, roadMat, 3.3);
           if (road) {
             road.userData.channelWall = true;
             if (hover) Object.assign(road.userData, hover);
@@ -2203,7 +2186,7 @@ function makePlaneGroup(paths, person, sharedChannels, relationshipChannels, opt
           for (const gateNumber of [channel.dataset.from, channel.dataset.to]) {
             const opening = gatePoints.get(+gateNumber);
             if (!opening) continue;
-            const ring = new THREE.Mesh(new THREE.RingGeometry(2.6, 3.3, 24),
+            const ring = new THREE.Mesh(new THREE.RingGeometry(channelClearWidth / 2, channelClearWidth / 2 + channelWallRadius * 2, 24),
               new THREE.MeshBasicMaterial({ color: roadColor, side: THREE.DoubleSide, depthTest: false, depthWrite: false }));
             ring.position.set(opening.x, opening.y, 3.4);
             ring.renderOrder = 8;
@@ -2538,7 +2521,7 @@ function makeTransitGroup(data, snapshot, natalGates, person) {
     for (const side of [-1, 1]) {
       const wallPoints = channelSidePoints(centerline, side);
       // Dotted walls identify a transit; its particle route stays continuous.
-      for (const wall of dashedTubesFromPoints(wallPoints, 0.48, roadMaterial, 3.3, 1.2, 2.2)) {
+      for (const wall of dashedTubesFromPoints(wallPoints, channelWallRadius, roadMaterial, 3.3, 1.2, 2.2)) {
         Object.assign(wall.userData, hover);
         group.add(wall);
       }
@@ -2546,7 +2529,7 @@ function makeTransitGroup(data, snapshot, natalGates, person) {
     for (const gateNumber of [from, to]) {
       const opening = gatePoints.get(gateNumber);
       if (!opening) continue;
-      const ring = new THREE.Mesh(new THREE.RingGeometry(2.6, 3.3, 24),
+      const ring = new THREE.Mesh(new THREE.RingGeometry(channelClearWidth / 2, channelClearWidth / 2 + channelWallRadius * 2, 24),
         new THREE.MeshBasicMaterial({ color, side: THREE.DoubleSide, depthTest: false, depthWrite: false }));
       ring.position.set(opening.x, opening.y, 3.3);
       ring.renderOrder = 8;
@@ -3983,32 +3966,6 @@ function animate() {
     particle.glow.scale.setScalar(pulse);
     particle.glowMaterial.opacity = 0.2 + pulse * 0.25;
   }
-  // Native WebGL lines stay one pixel wide regardless of zoom.
-  chartRoot.traverse(object => {
-    if (!object.isMesh || object.userData.thinStrokeConverted || !object.geometry) return;
-    const geometry = object.geometry, parameters = geometry.parameters;
-    const materials = Array.isArray(object.material) ? object.material : [object.material];
-    if (materials.every(material => material.colorWrite === false || material.opacity === 0)) return;
-    let points = null, loop = false;
-    if (geometry.type === 'RingGeometry') {
-      const radius = (parameters.innerRadius + parameters.outerRadius) / 2;
-      points = Array.from({ length: 48 }, (_, i) => new THREE.Vector3(Math.cos(i / 48 * Math.PI * 2) * radius, Math.sin(i / 48 * Math.PI * 2) * radius, 0));
-      loop = true;
-    } else if (geometry.type === 'TubeGeometry' && parameters.radius < 3) {
-      points = parameters.path.getPoints(parameters.tubularSegments);
-    }
-    if (!points) return;
-    const lineGeometry = new THREE.BufferGeometry().setFromPoints(points);
-    const original = materials[0];
-    const material = new THREE.LineBasicMaterial({ color: original.color, opacity: original.opacity, transparent: original.transparent, depthTest: original.depthTest, depthWrite: false, toneMapped: false });
-    const stroke = loop ? new THREE.LineLoop(lineGeometry, material) : new THREE.Line(lineGeometry, material);
-    stroke.userData = { ...object.userData };
-    stroke.renderOrder = object.renderOrder;
-    object.userData.thinStrokeConverted = true;
-    object.material = original.clone();
-    object.material.colorWrite = false;
-    object.add(stroke);
-  });
   renderer.render(scene, camera);
   requestAnimationFrame(animate);
 }
