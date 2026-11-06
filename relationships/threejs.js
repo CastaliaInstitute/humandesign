@@ -1674,6 +1674,7 @@ function addBodygraphSvgPlane(group, paths, activationVisibility = {}) {
   // The Three.js pass below draws every channel from its SVG path. Hide the
   // rasterized channel strokes so defined channels are not painted twice.
   artwork.querySelectorAll('.channel-group').forEach(channel => {
+    channel.style.setProperty('display', 'none', 'important');
     channel.querySelectorAll('.channel,.channel-core,.channel-highlight,.channel-flow,.channel-hit,.hanging-segments,.channel-open-ends')
       .forEach(path => path.style.opacity = '0');
     channel.classList.remove('is-partial', 'is-hanging-flex', 'is-flowing', 'is-transit-defined');
@@ -1754,6 +1755,7 @@ function makePlaneGroup(paths, person, sharedChannels, relationshipChannels, opt
   addChartColorShadow(group, color);
   addBodygraphSvgPlane(group, paths, activationVisibility);
   const gatePoints = getGatePoints(paths);
+  const renderedChannels = new Set();
   for (const path of paths) {
     const node = path.userData.node;
     if (!node) continue;
@@ -1784,6 +1786,8 @@ function makePlaneGroup(paths, person, sharedChannels, relationshipChannels, opt
     }
 
     if (path.subPaths?.length && isChannel) {
+      if (renderedChannels.has(channelId)) continue;
+      renderedChannels.add(channelId);
       // Keep each person's channels tinted by their chart color, including
       // open channels; lower opacity keeps the active paths in focus.
       const roadColor = color;
@@ -1999,6 +2003,9 @@ function extractLayer(doc, person, gates, activations = []) {
     if (child === keep || ['defs', 'style'].includes(child.localName)) continue;
     child.remove();
   }
+  // The live SVG adds animated copies of channel paths. Three.js builds
+  // its own hanging geometry, so parse only each original centerline.
+  keep.querySelectorAll('.hanging-active-half,.hanging-segments,.channel-arrowhead-layer,.channel-open-ends,.channel-backdrop,.physics-particle,.flow-dot').forEach(node => node.remove());
   const activationTypes = new Map();
   for (const activation of activations) {
     const type = String(activation.type || '').toLowerCase();
