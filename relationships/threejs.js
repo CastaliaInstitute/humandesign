@@ -1814,6 +1814,7 @@ function makePlaneGroup(paths, person, sharedChannels, relationshipChannels, opt
           tubeGroup.add(activationHalo);
           const wall = createDynamicTube(2.2, 0.34, true, 36, 8, sourceColor, sinkColor);
           const core = createDynamicTube(0.78, 0.95, false, 36, 6, sourceColor, sinkColor);
+          const typeStripe = createDynamicTube(0.98, 0.98, false, 36, 5, hangingAccent, hangingAccent);
           const particleSourceColor = new THREE.Color(sourceColor);
           const particleSinkColor = new THREE.Color(sinkColor);
           const flowParticles = Array.from({ length: 10 }, (_, index) => {
@@ -1828,10 +1829,10 @@ function makePlaneGroup(paths, person, sharedChannels, relationshipChannels, opt
             return { bead, material, phase: index / 10 };
           });
           if (hover) { Object.assign(wall.mesh.userData, hover); Object.assign(core.mesh.userData, hover); }
-          tubeGroup.add(wall.mesh, core.mesh);
+          tubeGroup.add(wall.mesh, core.mesh, typeStripe.mesh);
           const phase = [...channelId].reduce((sum, char) => sum + char.charCodeAt(0), 0);
           hangingFlexAnimations.push({
-            tubeGroup, wall, core, route, chart: group, person, channelId,
+            tubeGroup, wall, core, typeStripe, route, chart: group, person, channelId,
             activeGate, openGate, activePoint, openPoint, reachTarget, activationHalo,
             hangingType,
             phase: (phase % 13) * 0.37,
@@ -3193,7 +3194,8 @@ function animate() {
   for (const flex of hangingFlexAnimations) {
     const natalGatesForFlex = currentNatalGates?.[flex.person];
     const isStillHanging = Boolean(natalGatesForFlex
-      && natalGatesForFlex.has(flex.activeGate) !== natalGatesForFlex.has(flex.openGate));
+      && natalGatesForFlex.has(flex.activeGate)
+      && !natalGatesForFlex.has(flex.openGate));
     if (!isStillHanging) {
       flex.tubeGroup.visible = false;
       continue;
@@ -3309,6 +3311,7 @@ function animate() {
     }
     updateDynamicTube(flex.wall, renderPoints);
     updateDynamicTube(flex.core, renderPoints);
+    updateDynamicTube(flex.typeStripe, renderPoints);
   }
   ambientParticles.rotation.y = elapsed * 0.006;
   const ambientPositions = ambientParticles.geometry.attributes.position.array;
