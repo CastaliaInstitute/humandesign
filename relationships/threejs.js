@@ -89,6 +89,11 @@ const planeGroups = {};
 // Double-clicking a chart temporarily removes its relationship connections.
 const relationshipMutedCharts = new Set();
 const chartInitials = new Map();
+const personLayerSettings = new Map();
+function layersFor(person) {
+  if (!personLayerSettings.has(person)) personLayerSettings.set(person, { design: true, personality: true, transits: true });
+  return personLayerSettings.get(person);
+}
 let relationshipGroup = null;
 let hangingFlexContainer = null;
 let activeRelationshipPairKey = '';
@@ -229,7 +234,8 @@ function addChartColorShadow(group, color) {
   group.add(shadow);
 }
 function clearChartInitials() {
-  for (const { sprite } of chartInitials.values()) {
+  for (const { sprite, controls: layerControls } of chartInitials.values()) {
+    layerControls?.remove();
     scene.remove(sprite);
     sprite.material.map?.dispose();
     sprite.material.dispose();
@@ -256,16 +262,39 @@ function addChartInitial(person, initial, color) {
   label.name = `${initial} chart initial`;
   label.renderOrder = 20;
   scene.add(label);
-  chartInitials.set(person, { sprite: label });
+  const layerControls = document.createElement('div');
+  layerControls.className = 'bodygraph-layer-controls';
+  layerControls.setAttribute('role', 'group');
+  layerControls.setAttribute('aria-label', (window.hdChartNames?.[person] || person) + ' activation layers');
+  for (const [key, title, tint] of [['design', 'Design', '#ff5968'], ['personality', 'Personality', '#419dff'], ['transits', 'Transits', '#c0c7d2']]) {
+    const item = document.createElement('label');
+    const input = document.createElement('input');
+    input.type = 'checkbox';
+    input.checked = layersFor(person)[key];
+    input.style.accentColor = tint;
+    input.addEventListener('change', () => {
+      layersFor(person)[key] = input.checked;
+      rebuildRelationship();
+    });
+    item.append(input, document.createTextNode(title));
+    layerControls.append(item);
+  }
+  document.body.append(layerControls);
+  chartInitials.set(person, { sprite: label, controls: layerControls });
 }
 function syncChartInitials() {
   chartRoot.updateMatrixWorld(true);
-  for (const [person, { sprite }] of chartInitials) {
+  for (const [person, { sprite, controls: layerControls }] of chartInitials) {
     const point = chartPointInFamily({ x: 180, y: chartFrameHeight + 22 }, person);
     sprite.position.copy(chartRoot.localToWorld(point));
     sprite.visible = person === 'daniel' ? (planeGroups.daniel?.visible ?? true)
       : person === 'camille' ? (planeGroups.camille?.visible ?? true)
         : (familyGroups[person]?.visible ?? true);
+    const rect = canvas.getBoundingClientRect();
+    const projected = sprite.position.clone().project(camera);
+    layerControls.hidden = !sprite.visible || projected.z < -1 || projected.z > 1;
+    layerControls.style.left = (rect.left + (projected.x + 1) * rect.width / 2) + 'px';
+    layerControls.style.top = (rect.top + (1 - projected.y) * rect.height / 2 + 16) + 'px';
   }
 }
 function chartTextColor(person) {
@@ -917,8 +946,8 @@ function frontFamilyReading() {
     if (sharedChannels.length) facts.push(`Both charts also define ${sharedChannels.map(channel => `${channel.label}${channel.reading?.name ? ` ${channel.reading.name}` : ''}`).join(', ')} individually, reinforcing a shared channel theme`);
     if (sharedGates.length) facts.push(`They share gates ${sharedGates.join(', ')}, adding common activation themes`);
     if (transitToggle.checked && transitSnapshot) {
-      const activeA = new Set([...gatesA, ...transitGates]);
-      const activeB = new Set([...gatesB, ...transitGates]);
+      const activeA = new Set([...gatesA, ...(layersFor(personA).transits ? transitGates : [])]);
+      const activeB = new Set([...gatesB, ...(layersFor(personB).transits ? transitGates : [])]);
       const temporaryConnections = channels.flatMap(channel => {
         if (gatesA.has(channel.from) && gatesA.has(channel.to) || gatesB.has(channel.from) && gatesB.has(channel.to)) return [];
         const directions = [[channel.from, channel.to], [channel.to, channel.from]];
@@ -2237,8 +2266,8 @@ function refreshRelationshipPairing(force = false) {
 function relationshipLinkSpecs(a, b, personA, personB, natalGates, transitGates) {
   const gatesA = natalGates[personA] || new Set();
   const gatesB = natalGates[personB] || new Set();
-  const activeA = new Set([...gatesA, ...transitGates]);
-  const activeB = new Set([...gatesB, ...transitGates]);
+  const activeA = new Set([...gatesA, ...(layersFor(personA).transits ? transitGates : [])]);
+  const activeB = new Set([...gatesB, ...(layersFor(personB).transits ? transitGates : [])]);
   // A bridge represents something completed across these two charts. Skip a
   // channel either chart already has natally, and do not count sky-only links.
   if ((gatesA.has(a) && gatesA.has(b)) || (gatesB.has(a) && gatesB.has(b))) return [];
@@ -2382,9 +2411,9 @@ function rebuildRelationship() {
     chartData[person] = data;
     releaseGroup(planeGroups[person]);
     const group = makePlaneGroup(data.paths, person, sharedChannels, relationshipChannels, {
-      scale: familyLayout.parentScale, transitSnapshot: activeTransitSnapshot,
+      scale: familyLayout.parentScale, transitSnapshot: layersFor(person).transits ? activeTransitSnapshot : null,
       activeGates: natalGates[person],
-      activationVisibility,
+      activationVisibility: layersFor(person),
       relationshipParticipants,
       relationshipReachTargets: relationshipReachTargets[person]
     });
@@ -2411,6 +2440,7 @@ function rebuildRelationship() {
   }
   if (activeTransitSnapshot) {
     for (const person of ['daniel', 'camille']) {
+      if (!layersFor(person).transits) continue;
       const natalGates = parseGateList(person === 'daniel' ? '#danielGates' : '#camilleGates');
       const activations = new Set([...natalGates, ...activeTransitSnapshot.gates]);
       const transitData = loader.parse(extractLayer(sourceDocument, person, activations, window.hdNatalPlanetaryActivations?.[person] || []));
@@ -2445,9 +2475,9 @@ function rebuildRelationship() {
     chartData[child.id] = childData;
     const color = chartColor(child.id);
     const childGroup = makePlaneGroup(childData.paths, child.id, new Set(), relationshipChannels, {
-      color, name: child.name, scale: childScale, flipX, transitSnapshot: activeTransitSnapshot,
+      color, name: child.name, scale: childScale, flipX, transitSnapshot: layersFor(child.id).transits ? activeTransitSnapshot : null,
       activeGates: childGates,
-      activationVisibility,
+      activationVisibility: layersFor(child.id),
       relationshipParticipants,
       relationshipReachTargets: relationshipReachTargets[child.id]
     });
@@ -2455,7 +2485,7 @@ function rebuildRelationship() {
     childPosition.add(childGroup);
     familyGroups[child.id] = childPosition;
     chartRoot.add(childPosition);
-    if (activeTransitSnapshot) {
+    if (activeTransitSnapshot && layersFor(child.id).transits) {
       const activations = new Set([...childGates, ...activeTransitSnapshot.gates]);
       const transitData = loader.parse(extractLayer(sourceDocument, 'daniel', activations, child.activations || []));
       const transitGroup = makeTransitGroup(transitData, activeTransitSnapshot, childGates, child.id);
@@ -2792,7 +2822,7 @@ function fitCameraToFamily(rect = canvas.getBoundingClientRect()) {
     for (const point of [
       { x: 180 - halfWidth, y: 0 }, { x: 180 + halfWidth, y: 0 },
       // Include the dynamically spread root center and its name tag below it.
-      { x: 180 - halfWidth, y: chartFrameHeight + 24 }, { x: 180 + halfWidth, y: chartFrameHeight + 24 }
+      { x: 180 - halfWidth, y: chartFrameHeight + 65 }, { x: 180 + halfWidth, y: chartFrameHeight + 65 }
     ]) {
       const world = chartRoot.localToWorld(chartPointInFamily(point, person));
       const relative = world.sub(controls.target);
