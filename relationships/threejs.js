@@ -1432,7 +1432,7 @@ function addCenterParticleAnimations(group, paths) {
       bead.userData.centerParticle = true;
       group.add(bead);
       const particle = {
-        bead, glow, glowMaterial, container: group,
+        bead, glow, glowMaterial, container: group, centerId,
         polygon: polygon.map(point => point.clone()), velocity: new THREE.Vector3(),
         state: 'plane', age: 0, escapeAt: 0, escapeVelocity: null,
         escapeDuration: 1.2 + Math.random() * 1.2
@@ -2037,6 +2037,9 @@ function makePlaneGroup(paths, person, sharedChannels, relationshipChannels, opt
           hangingFlexAnimations.push({
             tubeGroup, wall, core, route, chart: group, person, channelId,
             activeGate, openGate, activePoint, openPoint, reachTarget, activationHalo,
+            isSink: channel.dataset.direction === 'directed' && activeGate === Number(channel.dataset.to),
+            sourceCenter: channel.ownerSVGElement?.querySelector('.gate[data-gate="' + openGate + '"]')?.dataset.center,
+            activeCenter: activeGateNode?.dataset.center,
             hangingType,
             phase: (phase % 13) * 0.37,
             amplitude: Math.min(8 + (phase % 5) * 2.2, route[0].distanceTo(route.at(-1)) * 0.18),
@@ -3641,7 +3644,7 @@ function animate() {
     }
     const particleCurve = new THREE.CatmullRomCurve3(particlePathPoints, false, 'centripetal');
     if (!flex.systemRoute) {
-      flex.systemRoute = { container: chartRoot, curve: particleCurve, reverse: false, person: flex.person, hanging: true };
+      flex.systemRoute = { container: chartRoot, curve: particleCurve, reverse: flex.isSink, person: flex.person, hanging: true, sourceCenter: flex.sourceCenter, activeCenter: flex.activeCenter };
       systemChannelRoutes.push(flex.systemRoute);
     }
     flex.systemRoute.curve = particleCurve;
@@ -3738,6 +3741,7 @@ function animate() {
         if (receiver) {
           receiver.container.attach(particle.bead);
           particle.container = receiver.container;
+          particle.centerId = receiver.centerId;
           particle.polygon = receiver.polygon.map(point => point.clone());
           const center = particle.polygon.reduce((sum, p) => sum.add(p), new THREE.Vector2()).multiplyScalar(1 / particle.polygon.length);
           const inward = new THREE.Vector3(center.x - particle.bead.position.x, center.y - particle.bead.position.y, 0).normalize();
@@ -3754,8 +3758,22 @@ function animate() {
       const position = particle.bead.position;
       const world = particle.bead.getWorldPosition(new THREE.Vector3());
       particle.channelCooldown = Math.max(0, (particle.channelCooldown || 0) - delta);
+      if (!particle.channelCooldown) {
+        const outlets = systemChannelRoutes.filter(route => route.hanging && !route.reverse
+          && route.person === particle.container.userData.chartPerson && route.activeCenter === particle.centerId);
+        let nearest = null, nearestDistance = 45;
+        for (const outlet of outlets) {
+          const entry = particle.container.worldToLocal(outlet.container.localToWorld(outlet.curve.getPointAt(0).clone()));
+          const distance = entry.distanceTo(position);
+          if (distance < nearestDistance) { nearest = entry; nearestDistance = distance; }
+        }
+        if (nearest) {
+          const pull = nearest.sub(position); pull.z = 0;
+          particle.velocity.lerp(pull.normalize().multiplyScalar(14), 1 - Math.exp(-delta * 4));
+        }
+      }
       const route = !particle.channelCooldown && systemChannelRoutes.find(route => {
-        if (route.hanging && route.person !== particle.container.userData.chartPerson) return false;
+        if (route.hanging && (route.reverse || route.person !== particle.container.userData.chartPerson)) return false;
         if (!route.hanging && route.container.userData.chartPerson !== particle.container.userData.chartPerson) return false;
         const entry = route.container.localToWorld(route.curve.getPointAt(route.reverse ? 1 : 0).clone());
         return entry.distanceTo(world) < 7;
@@ -3791,6 +3809,30 @@ function animate() {
     } else {
       particle.age += delta;
       const velocity = particle.escapeVelocity;
+      // Sink tips recruit the same escaped system motes, selected by the
+      // chakra they came from; no channel-specific particles are emitted.
+      const world = particle.bead.getWorldPosition(new THREE.Vector3());
+      let sink = null, sinkPoint = null, sinkDistance = 140;
+      for (const route of systemChannelRoutes) {
+        if (!route.hanging || !route.reverse || route.sourceCenter !== particle.centerId
+          || !familyMemberIsVisible(route.person)) continue;
+        const tip = route.container.localToWorld(route.curve.getPointAt(1).clone());
+        const distance = tip.distanceTo(world);
+        if (distance < sinkDistance) { sink = route; sinkPoint = tip; sinkDistance = distance; }
+      }
+      if (sink) {
+        const target = particle.container.worldToLocal(sinkPoint);
+        const direction = target.sub(particle.bead.position).normalize();
+        velocity.lerp(direction.multiplyScalar(42), 1 - Math.exp(-delta * 5));
+        particle.age = 0;
+        particle.bead.scale.setScalar(1);
+        if (sinkDistance < 7) {
+          particle.channelRoute = sink;
+          particle.channelDistance = 0;
+          particle.state = 'channel';
+          continue;
+        }
+      }
       const position = particle.bead.position;
       const swirl = new THREE.Vector3(-position.z, 0, position.x).normalize();
       velocity.addScaledVector(swirl, delta * 2.4);
