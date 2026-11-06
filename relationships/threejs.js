@@ -1946,7 +1946,11 @@ function makePlaneGroup(paths, person, sharedChannels, relationshipChannels, opt
         for (const side of [-1, 1]) {
           const rail = channelSidePoints(centerline, side);
           const road = tubeFromPoints(rail, active ? 0.48 : 0.25, roadMat, 2.4);
-          if (road) { if (hover) Object.assign(road.userData, hover); group.add(road); }
+          if (road) {
+            road.userData.channelWall = true;
+            if (hover) Object.assign(road.userData, hover);
+            group.add(road);
+          }
         }
         if (!active && !hanging && hover) {
           const hitMaterial = new THREE.MeshBasicMaterial({
@@ -2028,7 +2032,7 @@ function makePlaneGroup(paths, person, sharedChannels, relationshipChannels, opt
   // The embedded SVG is the visual source of truth. Keep the traced Three.js
   // geometry as invisible raycast targets for existing chart interactions.
   group.traverse(object => {
-    if (!object.userData.svgPart || !object.material) return;
+    if (!object.userData.svgPart || object.userData.channelWall || !object.material) return;
     for (const material of Array.isArray(object.material) ? object.material : [object.material]) {
       material.colorWrite = false;
       material.depthWrite = false;
