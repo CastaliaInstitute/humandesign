@@ -1197,6 +1197,57 @@ function channelSidePoints(points, side, normal = new THREE.Vector3(0, 0, 1)) {
     return point.clone().addScaledVector(lateral.normalize(), side * 2.6);
   });
 }
+function avoidHangingObstacles(points, flex) {
+  const chart = flex.chart;
+  chart.updateWorldMatrix(true, false);
+  const polygons = chart.userData.channelObstacles || [];
+  const gates = currentGatePoints[flex.person] || new Map();
+  const anchor = gates.get(flex.activeGate);
+  const curve = new THREE.CatmullRomCurve3(points, false, 'centripetal');
+  return Array.from({ length: 73 }, (_, index) => {
+    const point = curve.getPointAt(index / 72);
+    if (index === 0) return point;
+    const local = chart.worldToLocal(chartRoot.localToWorld(point.clone()));
+    // Preserve the short socket where the tube emerges from its own gate.
+    if (anchor && Math.hypot(local.x - anchor.x, local.y - anchor.y) < 7) return point;
+    for (let pass = 0; pass < 3; pass++) {
+      for (const polygon of polygons) {
+        let closest = null, distance = Infinity;
+        for (let i = 0; i < polygon.length; i++) {
+          const a = polygon[i], b = polygon[(i + 1) % polygon.length];
+          const dx = b.x - a.x, dy = b.y - a.y;
+          const t = THREE.MathUtils.clamp(((local.x - a.x) * dx + (local.y - a.y) * dy) / (dx * dx + dy * dy || 1), 0, 1);
+          const edge = new THREE.Vector2(a.x + t * dx, a.y + t * dy);
+          const d = Math.hypot(local.x - edge.x, local.y - edge.y);
+          if (d < distance) { distance = d; closest = edge; }
+        }
+        const inside = pointInPolygon(local.x, local.y, polygon);
+        if (closest && (inside || distance < 5)) {
+          const direction = new THREE.Vector2(local.x - closest.x, local.y - closest.y);
+          if (inside) direction.negate();
+          if (direction.lengthSq() < 1e-8) {
+            const center = polygon.reduce((sum, p) => sum.add(p), new THREE.Vector2()).multiplyScalar(1 / polygon.length);
+            direction.copy(closest).sub(center);
+          }
+          direction.normalize();
+          local.x = closest.x + direction.x * 5;
+          local.y = closest.y + direction.y * 5;
+        }
+      }
+      for (const [gate, location] of gates) {
+        if (gate === flex.activeGate) continue;
+        const direction = new THREE.Vector2(local.x - location.x, local.y - location.y);
+        if (direction.length() < 7) {
+          if (direction.lengthSq() < 1e-8) direction.set(1, 0);
+          direction.normalize().multiplyScalar(7);
+          local.x = location.x + direction.x;
+          local.y = location.y + direction.y;
+        }
+      }
+    }
+    return chartRoot.worldToLocal(chart.localToWorld(local));
+  });
+}
 function updateDynamicTube(tube, points) {
   if (points.length < 2) return;
   const curve = new THREE.CatmullRomCurve3(points, false, 'centripetal');
@@ -1726,6 +1777,9 @@ function makePlaneGroup(paths, person, sharedChannels, relationshipChannels, opt
   const activationTypesVisible = types => types.size === 0 || [...types].some(type => activationVisibility[type] !== false);
   addChartColorShadow(group, color);
   addBodygraphSvgPlane(group, paths, activationVisibility);
+  group.userData.channelObstacles = paths.filter(path =>
+    path.userData?.node?.getAttribute('class')?.split(/\s+/).includes('center-shape'))
+    .flatMap(path => path.toShapes(true).map(shape => shape.getPoints(32)));
   const gatePoints = getGatePoints(paths);
   const renderedChannels = new Set();
   for (const path of paths) {
@@ -3308,7 +3362,7 @@ function animate() {
       endPoint.addScaledVector(twistAxis, flutter * tipAmplitude * 0.32);
     }
     const endDelta = endPoint.clone().sub(basePoints[basePoints.length - 1]);
-    const points = basePoints.map((point, index) => {
+    let points = basePoints.map((point, index) => {
       const t = index / (basePoints.length - 1);
       const bend = THREE.MathUtils.smoothstep(t, 0.18, 1);
       point.addScaledVector(startDelta, 1 - bend).addScaledVector(endDelta, bend);
@@ -3318,6 +3372,7 @@ function animate() {
       point.addScaledVector(twistAxis, envelope * flutter * flex.amplitude * 0.28);
       return point;
     });
+    if (!target) points = avoidHangingObstacles(points, flex);
     const fullChannelCurve = new THREE.CatmullRomCurve3(points, false, 'centripetal');
     const renderPoints = target
       ? Array.from({ length: 19 }, (_, index) => fullChannelCurve.getPointAt(index / 36))
