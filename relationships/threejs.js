@@ -2001,7 +2001,7 @@ function makePlaneGroup(paths, person, sharedChannels, relationshipChannels, opt
             activeGate, openGate, activePoint, openPoint, reachTarget, activationHalo,
             hangingType,
             phase: (phase % 13) * 0.37,
-            amplitude: 8 + (phase % 5) * 2.2,
+            amplitude: Math.min(8 + (phase % 5) * 2.2, route[0].distanceTo(route.at(-1)) * 0.18),
             duration: 2.7 + (phase % 7) * 0.23,
             flowParticles, particleSourceColor, particleSinkColor,
             tipPosition: null, tipVelocity: new THREE.Vector3(),
@@ -3568,7 +3568,22 @@ function animate() {
       return point;
     });
     points = separateHangingChannels(points, flex, hangingNeighbors);
-    if (!target) points = avoidHangingObstacles(points, flex);
+    if (!target) {
+      points = avoidHangingObstacles(points, flex);
+      // Preserve forward progress from the socket to the free end. Collision
+      // corrections must never turn a short strand into a loop or hairpin.
+      const anchor = points[0].clone();
+      const forward = restEnd.clone().sub(activeAnchor).normalize();
+      const restLength = restEnd.distanceTo(activeAnchor);
+      let previousAdvance = 0;
+      for (let index = 1; index < points.length; index++) {
+        const t = index / (points.length - 1);
+        const minimumAdvance = Math.max(previousAdvance + restLength / (points.length - 1) * 0.15, restLength * t * 0.65);
+        const advance = points[index].clone().sub(anchor).dot(forward);
+        if (advance < minimumAdvance) points[index].addScaledVector(forward, minimumAdvance - advance);
+        previousAdvance = Math.max(advance, minimumAdvance);
+      }
+    }
     const fullChannelCurve = new THREE.CatmullRomCurve3(points, false, 'centripetal');
     const renderPoints = target
       ? Array.from({ length: 19 }, (_, index) => fullChannelCurve.getPointAt(index / 36))
