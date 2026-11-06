@@ -2863,9 +2863,9 @@ function loadFeatureDescriptions(svgDocument) {
 
 async function init() {
   try {
-    sourceDocument = await loadBodygraphTemplate('../bodygraph.svg?v=active-center-fill-20261105');
+    sourceDocument = await loadBodygraphTemplate('../bodygraph.svg?v=active-center-fill-20261106');
     try {
-      const descriptionsResponse = await fetch('../bodygraph.svg?v=active-center-fill-20261105');
+      const descriptionsResponse = await fetch('../bodygraph.svg?v=active-center-fill-20261106');
       if (descriptionsResponse.ok) {
         const descriptionsDocument = new DOMParser().parseFromString(await descriptionsResponse.text(), 'image/svg+xml');
         if (!descriptionsDocument.querySelector('parsererror')) loadFeatureDescriptions(descriptionsDocument);
