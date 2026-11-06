@@ -285,7 +285,11 @@ function addChartInitial(person, initial, color) {
     item.append(input, document.createTextNode(title));
     layerControls.append(item);
   }
-  document.body.append(layerControls);
+  const ownerLabel = document.createElement('strong');
+  ownerLabel.textContent = initial;
+  ownerLabel.style.color = color.getStyle();
+  layerControls.prepend(ownerLabel);
+  document.querySelector('#footerLayerControls').append(layerControls);
   chartInitials.set(person, { sprite: label, controls: layerControls });
 }
 function syncChartInitials() {
@@ -296,11 +300,7 @@ function syncChartInitials() {
     sprite.visible = person === 'daniel' ? (planeGroups.daniel?.visible ?? true)
       : person === 'camille' ? (planeGroups.camille?.visible ?? true)
         : (familyGroups[person]?.visible ?? true);
-    const rect = canvas.getBoundingClientRect();
-    const projected = sprite.position.clone().project(camera);
-    layerControls.hidden = !sprite.visible || projected.z < -1 || projected.z > 1;
-    layerControls.style.left = (rect.left + (projected.x + 1) * rect.width / 2) + 'px';
-    layerControls.style.top = (rect.top + (1 - projected.y) * rect.height / 2 + 16) + 'px';
+    layerControls.hidden = !sprite.visible;
   }
 }
 function chartTextColor(person) {
