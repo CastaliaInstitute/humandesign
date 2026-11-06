@@ -2249,8 +2249,12 @@ function makeTransitGroup(data, snapshot, natalGates, person) {
     const points = snapChannelEndpoints(path.subPaths[0].getPoints(48), gatePoints, from, to);
     const centerline = points.map(point => new THREE.Vector3(point.x, point.y, 3.3));
     for (const side of [-1, 1]) {
-      const wall = tubeFromPoints(channelSidePoints(centerline, side), 0.48, roadMaterial, 3.3);
-      if (wall) { Object.assign(wall.userData, hover); group.add(wall); }
+      const wallPoints = channelSidePoints(centerline, side);
+      // Dotted walls identify a transit; its particle route stays continuous.
+      for (const wall of dashedTubesFromPoints(wallPoints, 0.48, roadMaterial, 3.3, 1.2, 2.2)) {
+        Object.assign(wall.userData, hover);
+        group.add(wall);
+      }
     }
     const flowCurve = new THREE.CatmullRomCurve3(centerline, false, 'centripetal');
     addFlowMotion(group, flowCurve, color.getStyle(), hover);
