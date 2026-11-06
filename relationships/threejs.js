@@ -2223,9 +2223,17 @@ function makePlaneGroup(paths, person, sharedChannels, relationshipChannels, opt
           const flowParticles = [];
           if (hover) { Object.assign(wall.mesh.userData, hover); Object.assign(core.mesh.userData, hover); }
           tubeGroup.add(wall.mesh, core.mesh);
+          const hitTube = createDynamicTube(6, 0, false, 24, 4, sourceColor, sinkColor);
+          hitTube.mesh.material.colorWrite = false;
+          hitTube.mesh.material.depthWrite = false;
+          hitTube.mesh.userData.svgPart = false;
+          hitTube.mesh.userData.channelHitTarget = true;
+          if (hover) Object.assign(hitTube.mesh.userData, hover);
+          tubeGroup.add(hitTube.mesh);
+
           const phase = [...channelId].reduce((sum, char) => sum + char.charCodeAt(0), 0);
           hangingFlexAnimations.push({
-            tubeGroup, wall, core, route, chart: group, person, channelId,
+            tubeGroup, wall, core, hitTube, route, chart: group, person, channelId,
             activeGate, openGate, activePoint, openPoint, reachTarget, activationHalo,
             isSink: channel.dataset.direction === 'directed' && activeGate === Number(channel.dataset.to),
             sourceCenter: channel.ownerSVGElement?.querySelector('.gate[data-gate="' + openGate + '"]')?.dataset.center,
@@ -3888,6 +3896,13 @@ function animate() {
       const progress = (elapsed * 0.27 + particle.phase) % 1;
       particle.bead.position.copy(particleCurve.getPointAt(progress));
       particle.material.color.copy(flex.particleSourceColor).lerp(flex.particleSinkColor, progress);
+    }
+    // A roughly 24-pixel touch corridor follows the moving bridge at every
+    // zoom level, without changing its visible walls.
+    if (flex.hitTube) {
+      const viewportHeight = Math.max(1, canvas.clientHeight);
+      flex.hitTube.radius = Math.max(channelWallOffset, (camera.top - camera.bottom) / camera.zoom / viewportHeight * 12);
+      updateDynamicTube(flex.hitTube, renderPoints);
     }
     updateDynamicTube(flex.wall, channelSidePoints(renderPoints, -1, reachNormal));
     updateDynamicTube(flex.core, channelSidePoints(renderPoints, 1, reachNormal));
