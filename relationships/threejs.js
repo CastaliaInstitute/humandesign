@@ -1197,6 +1197,39 @@ function channelSidePoints(points, side, normal = new THREE.Vector3(0, 0, 1)) {
     return point.clone().addScaledVector(lateral.normalize(), side * 2.6);
   });
 }
+function separateHangingChannels(points, flex, neighbors) {
+  if (flex.locked) return points;
+  const clearance = 9; // Includes both tube walls and a visible gap.
+  return points.map((point, index) => {
+    const weight = THREE.MathUtils.smoothstep(index / (points.length - 1), 0.18, 0.5);
+    if (!weight) return point;
+    const push = new THREE.Vector3();
+    for (const neighbor of neighbors) {
+      if (neighbor.flex === flex) continue;
+      // Complementary ends must still be able to meet and lock.
+      if (flex.reachTarget?.person === neighbor.flex.person
+        && flex.channelId === neighbor.flex.channelId) continue;
+      let nearest = null, distanceSq = clearance * clearance;
+      for (let i = 1; i < neighbor.points.length; i++) {
+        const a = neighbor.points[i - 1], b = neighbor.points[i];
+        const segment = b.clone().sub(a);
+        const t = THREE.MathUtils.clamp(point.clone().sub(a).dot(segment) / (segment.lengthSq() || 1), 0, 1);
+        const candidate = a.clone().addScaledVector(segment, t);
+        const d = candidate.distanceToSquared(point);
+        if (d < distanceSq) { nearest = candidate; distanceSq = d; }
+      }
+      if (!nearest) continue;
+      const direction = point.clone().sub(nearest);
+      const distance = Math.sqrt(distanceSq);
+      if (distance < 0.001) {
+        direction.set(0, 0, flex.channelId.localeCompare(neighbor.flex.channelId) < 0 ? -1 : 1);
+      } else direction.multiplyScalar(1 / distance);
+      push.addScaledVector(direction, (clearance - distance) * 0.65);
+    }
+    push.clampLength(0, 4);
+    return point.clone().addScaledVector(push, weight);
+  });
+}
 function avoidHangingObstacles(points, flex) {
   const chart = flex.chart;
   chart.updateWorldMatrix(true, false);
@@ -3300,6 +3333,10 @@ function animate() {
     const blended = low.add(high);
     return blended.lengthSq() > 0.001 ? blended.normalize() : low;
   };
+  // Use one snapshot for every strand, avoiding update-order bias.
+  const hangingNeighbors = hangingFlexAnimations
+    .filter(flex => flex.avoidancePoints && memberVisible(flex.person))
+    .map(flex => ({ flex, points: flex.avoidancePoints }));
   for (const flex of hangingFlexAnimations) {
     const natalGatesForFlex = currentNatalGates?.[flex.person];
     const isStillHanging = Boolean(natalGatesForFlex
@@ -3393,11 +3430,13 @@ function animate() {
       point.addScaledVector(twistAxis, envelope * flutter * flex.amplitude * 0.28);
       return point;
     });
+    points = separateHangingChannels(points, flex, hangingNeighbors);
     if (!target) points = avoidHangingObstacles(points, flex);
     const fullChannelCurve = new THREE.CatmullRomCurve3(points, false, 'centripetal');
     const renderPoints = target
       ? Array.from({ length: 19 }, (_, index) => fullChannelCurve.getPointAt(index / 36))
       : points;
+    flex.avoidancePoints = renderPoints.filter((point, index) => index % 3 === 0 || index === renderPoints.length - 1).map(point => point.clone());
     const particlePathPoints = points.map(point => point.clone());
     if (target) {
       const gapStart = points[points.length - 1];
