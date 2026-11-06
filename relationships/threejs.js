@@ -1738,6 +1738,10 @@ function makePlaneGroup(paths, person, sharedChannels, relationshipChannels, opt
     const fromActive = Boolean(channel && activeGates.has(+channel.dataset.from));
     const toActive = Boolean(channel && activeGates.has(+channel.dataset.to));
     const active = Boolean(channel && fromActive && toActive);
+    // Transit-completed channels are drawn once as full tubes by the overlay.
+    if (channel && !active
+      && (fromActive || transitGates.has(+channel.dataset.from))
+      && (toActive || transitGates.has(+channel.dataset.to))) continue;
     const gateActive = gate?.getAttribute('data-state') === 'closed';
     const centerActive = center?.getAttribute('data-defined') === 'true';
     const isChannel = cls.split(/\s+/).includes('channel');
@@ -2157,6 +2161,9 @@ function makeTransitGroup(data, snapshot, natalGates, person) {
   const group = new THREE.Group();
   const owner = window.hdChartNames?.[person] || (person === 'daniel' ? 'Person 1' : 'Person 2');
   group.name = `Current Human Design transit overlay · ${owner}`;
+  group.userData.chartPerson = person;
+  const renderedChannels = new Set();
+  const gatePoints = getGatePoints(data.paths);
   const transitGates = new Set(snapshot.gates);
   const activeGates = new Set([...natalGates, ...transitGates]);
   const color = chartColor(person);
@@ -2170,6 +2177,9 @@ function makeTransitGroup(data, snapshot, natalGates, person) {
     const from = +channel.dataset.from, to = +channel.dataset.to;
     if (!activeGates.has(from) || !activeGates.has(to) || (!transitGates.has(from) && !transitGates.has(to)) || !path.subPaths?.length) continue;
     const channelId = `${Math.min(from, to)}-${Math.max(from, to)}`;
+    if (natalGates.has(from) && natalGates.has(to)) continue;
+    if (renderedChannels.has(channelId)) continue;
+    renderedChannels.add(channelId);
     const reading = channelDescriptions.get(channelId) || relationshipChannelReadings[channelId];
     const gateSource = gate => {
       const parts = [];
@@ -2182,16 +2192,18 @@ function makeTransitGroup(data, snapshot, natalGates, person) {
       `Transit channel ${from}–${to}${reading?.name ? ` · ${reading.name}` : ''}`,
       `${reading?.description || 'The channel between these gates is temporarily activated.'} This channel is completed in ${owner}'s chart by ${gateSource(from)} and ${gateSource(to)}. Temporary transit overlay · ${snapshot.source}.`
     );
-    const points = path.subPaths[0].getPoints(48);
-    for (const dash of dashedTubesFromPoints(points, 1.35, roadMaterial, 2.85)) {
-      Object.assign(dash.userData, hover);
-      group.add(dash);
+    const points = snapChannelEndpoints(path.subPaths[0].getPoints(48), gatePoints, from, to);
+    const centerline = points.map(point => new THREE.Vector3(point.x, point.y, 3.3));
+    for (const side of [-1, 1]) {
+      const wall = tubeFromPoints(channelSidePoints(centerline, side), 0.48, roadMaterial, 3.3);
+      if (wall) { Object.assign(wall.userData, hover); group.add(wall); }
     }
-    const flowCurve = new THREE.CatmullRomCurve3(points.map(point => new THREE.Vector3(point.x, point.y, 3.55)), false, 'centripetal');
+    const flowCurve = new THREE.CatmullRomCurve3(centerline, false, 'centripetal');
     addFlowMotion(group, flowCurve, color.getStyle(), hover);
+    addFlowMotion(group, flowCurve, color.getStyle(), hover, true);
   }
   // Transit gate color is applied directly to the gate marker on the natal
-  // plane. This overlay adds only the dashed temporary channels and their flow.
+  // plane. This overlay adds continuous temporary channel walls and system particle routes.
   group.scale.y = -1;
   group.position.set(-180, 180, 0);
   return group;
@@ -3429,7 +3441,7 @@ function animate() {
       const world = particle.bead.getWorldPosition(new THREE.Vector3());
       const route = systemChannelRoutes.find(route => {
         if (route.hanging && route.person !== particle.container.userData.chartPerson) return false;
-        if (!route.hanging && route.container !== particle.container) return false;
+        if (!route.hanging && route.container.userData.chartPerson !== particle.container.userData.chartPerson) return false;
         const entry = route.container.localToWorld(route.curve.getPointAt(route.reverse ? 1 : 0).clone());
         return entry.distanceTo(world) < 7;
       });
