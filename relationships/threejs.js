@@ -106,6 +106,9 @@ let familyChildren = [];
 const hangingFlexAnimations = [];
 const includedFamilyMembers = new Set(['daniel', 'camille']);
 let relationshipInteractionEnabled = false;
+const lockedRelationshipPairs = new Set();
+const lockedRelationshipLinks = new Set();
+const relationshipPairKey = (a, b) => [a, b].sort().join(':');
 let transitSnapshot = null;
 let transitDurationEstimates = [];
 let lifetimeTimelineActive = false;
@@ -1735,6 +1738,19 @@ function makePlaneGroup(paths, person, sharedChannels, relationshipChannels, opt
           if (hover) Object.assign(tubeGroup.userData, hover);
           const wall = createDynamicTube(2.2, 0.34, true, 36, 8, sourceColor, sinkColor);
           const core = createDynamicTube(0.78, 0.95, false, 36, 6, sourceColor, sinkColor);
+          const particleSourceColor = new THREE.Color(sourceColor);
+          const particleSinkColor = new THREE.Color(sinkColor);
+          const flowParticles = Array.from({ length: 4 }, (_, index) => {
+            const material = new THREE.MeshBasicMaterial({
+              color: particleSourceColor, transparent: true, opacity: 0.96,
+              depthWrite: false, toneMapped: false
+            });
+            const bead = new THREE.Mesh(new THREE.SphereGeometry(2, 8, 6), material);
+            bead.visible = false;
+            bead.renderOrder = 5;
+            tubeGroup.add(bead);
+            return { bead, material, phase: index / 4 };
+          });
           if (hover) { Object.assign(wall.mesh.userData, hover); Object.assign(core.mesh.userData, hover); }
           tubeGroup.add(wall.mesh, core.mesh);
           const phase = [...channelId].reduce((sum, char) => sum + char.charCodeAt(0), 0);
@@ -1743,7 +1759,11 @@ function makePlaneGroup(paths, person, sharedChannels, relationshipChannels, opt
             activeGate, openGate, activePoint, openPoint, reachTarget,
             phase: (phase % 13) * 0.37,
             amplitude: 8 + (phase % 5) * 2.2,
-            duration: 2.7 + (phase % 7) * 0.23, reach: 0
+            duration: 2.7 + (phase % 7) * 0.23,
+            flowParticles, particleSourceColor, particleSinkColor,
+            tipPosition: null, tipVelocity: new THREE.Vector3(),
+            locked: Boolean(reachTarget && lockedRelationshipLinks.has(reachTarget.lockKey)),
+            lockKey: reachTarget?.lockKey || null
           });
           continue;
         }
@@ -1953,8 +1973,6 @@ function visibleFamilyPairs() {
 }
 function familyPairsWithinReach() {
   chartRoot.updateMatrixWorld(true);
-  const radiusFor = person => Math.hypot(chartSilhouetteWidth / 2, chartFrameHeight / 2) * (familyChildren.some(child => child.id === person)
-    ? familyLayout.childScale : familyLayout.parentScale);
   const centerFor = person => {
     const childIndex = familyChildren.findIndex(child => child.id === person);
     if (childIndex >= 0) {
@@ -1975,9 +1993,32 @@ function familyPairsWithinReach() {
     return new THREE.Vector3(0, chartFrameHeight * familyLayout.parentScale / 2, person === frontPerson ? radius : -radius);
   };
   const centers = new Map(Object.keys(currentNatalGates || {}).map(person => [person, centerFor(person)]));
+  const rect = canvas.getBoundingClientRect();
+  if (!rect.width || !rect.height) return [];
+  camera.updateMatrixWorld(true);
+  const projectChartPoint = (person, point) => chartRoot.localToWorld(chartPointInFamily(point, person)).project(camera);
+  const centerPixels = new Map();
+  const radiusPixels = new Map();
+  const halfWidth = chartSilhouetteWidth / 2;
+  for (const person of centers.keys()) {
+    const center = projectChartPoint(person, { x: 180, y: chartFrameHeight / 2 });
+    centerPixels.set(person, new THREE.Vector2((center.x + 1) * rect.width / 2, (1 - center.y) * rect.height / 2));
+    const corners = [
+      { x: 180 - halfWidth, y: 0 }, { x: 180 + halfWidth, y: 0 },
+      { x: 180 - halfWidth, y: chartFrameHeight }, { x: 180 + halfWidth, y: chartFrameHeight }
+    ];
+    const radius = Math.max(...corners.map(point => {
+      const projected = projectChartPoint(person, point);
+      const pixel = new THREE.Vector2((projected.x + 1) * rect.width / 2, (1 - projected.y) * rect.height / 2);
+      return pixel.distanceTo(centerPixels.get(person));
+    }));
+    radiusPixels.set(person, radius);
+  }
   return visibleFamilyPairs().filter(([a, b]) => {
-    const distance = centers.get(a)?.distanceTo(centers.get(b));
-    return Number.isFinite(distance) && distance <= 2 * Math.max(radiusFor(a), radiusFor(b));
+    if (lockedRelationshipPairs.has(relationshipPairKey(a, b))) return true;
+    const distance = centerPixels.get(a)?.distanceTo(centerPixels.get(b));
+    const reach = Math.max(radiusPixels.get(a) || 0, radiusPixels.get(b) || 0) * 2;
+    return Number.isFinite(distance) && distance <= reach;
   });
 }
 function refreshRelationshipPairing(force = false) {
@@ -2105,7 +2146,10 @@ function rebuildRelationship() {
           for (const spec of specs) {
             const addReachTarget = (person, activeGate, targetPerson, openGate) => {
               if (!natalGates[person]?.has(activeGate) || natalGates[person]?.has(openGate)) return;
-              relationshipReachTargets[person].set(channelId, { person: targetPerson, gate: openGate });
+              relationshipReachTargets[person].set(channelId, {
+                person: targetPerson, gate: openGate,
+                lockKey: `${relationshipPairKey(person, targetPerson)}:${channelId}:${person}`
+              });
             };
             addReachTarget(spec.fromPerson, spec.fromGate, spec.toPerson, spec.toGate);
             addReachTarget(spec.toPerson, spec.toGate, spec.fromPerson, spec.fromGate);
@@ -2136,7 +2180,10 @@ function rebuildRelationship() {
   familyLayout.parentRadius = half;
   planeGroups.daniel.position.z = frontPerson === 'daniel' ? familyLayout.parentRadius : -familyLayout.parentRadius;
   planeGroups.camille.position.z = -planeGroups.daniel.position.z;
+  document.querySelector('#separation').value = String(separation);
   document.querySelector('#separationValue').value = String(separation);
+  document.querySelector('#mainSeparation').value = String(separation);
+  document.querySelector('#mainSeparationValue').value = String(separation);
   for (const [person, group] of Object.entries(transitGroups)) {
     releaseGroup(group);
     delete transitGroups[person];
@@ -2542,7 +2589,10 @@ function setSeparation(value) {
   familyLayout.parentRadius = half;
   if (planeGroups.daniel) planeGroups.daniel.position.z = frontPerson === 'daniel' ? half : -half;
   if (planeGroups.camille) planeGroups.camille.position.z = -planeGroups.daniel.position.z;
+  document.querySelector('#separation').value = String(value);
   document.querySelector('#separationValue').value = String(value);
+  document.querySelector('#mainSeparation').value = String(value);
+  document.querySelector('#mainSeparationValue').value = String(value);
   if (sourceDocument) {
     rebuildRelationship();
     resize();
@@ -2852,8 +2902,35 @@ window.addEventListener('castalia-natal-profiles-ready', useCalculatedNatalParen
 const resizeObserver = new ResizeObserver(resize);
 resizeObserver.observe(canvas);
 document.querySelector('#separation').addEventListener('input', e => setSeparation(e.target.value));
+document.querySelector('#mainSeparation').addEventListener('input', e => setSeparation(e.target.value));
 for (const selector of ['#danielGates', '#camilleGates']) document.querySelector(selector).addEventListener('input', () => { clearTimeout(rebuildTimer); rebuildTimer = setTimeout(rebuildRelationship, 220); });
-document.querySelector('#showBridges').addEventListener('change', e => { if (relationshipGroup) relationshipGroup.visible = e.target.checked; });
+const showBridgesToggle = document.querySelector('#showBridges');
+const relationshipToggleButton = document.querySelector('#relationshipToggleButton');
+function syncRelationshipToggleButton() {
+  const enabled = showBridgesToggle.checked;
+  relationshipToggleButton.setAttribute('aria-pressed', String(enabled));
+  relationshipToggleButton.textContent = `Relationships · ${enabled ? 'On' : 'Off'}`;
+}
+showBridgesToggle.addEventListener('change', e => {
+  if (e.target.checked) {
+    relationshipInteractionEnabled = true;
+    if (sourceDocument && loader && natalParentsReady) rebuildRelationship();
+  } else {
+    lockedRelationshipPairs.clear();
+    lockedRelationshipLinks.clear();
+    for (const flex of hangingFlexAnimations) {
+      flex.locked = false;
+      flex.tipVelocity.set(0, 0, 0);
+    }
+  }
+  if (relationshipGroup) relationshipGroup.visible = e.target.checked;
+  syncRelationshipToggleButton();
+});
+relationshipToggleButton.addEventListener('click', () => {
+  showBridgesToggle.checked = !showBridgesToggle.checked;
+  showBridgesToggle.dispatchEvent(new Event('change', { bubbles: true }));
+});
+syncRelationshipToggleButton();
 document.querySelector('#showDaniel').addEventListener('change', e => {
   engageRelationship();
   if (e.target.checked) includedFamilyMembers.add('daniel');
@@ -2965,6 +3042,9 @@ function animate() {
     return result;
   };
   const rootInverse = chartRoot.getWorldQuaternion(new THREE.Quaternion()).invert();
+  const cameraQuaternion = camera.getWorldQuaternion(new THREE.Quaternion());
+  const familyViewRight = new THREE.Vector3(1, 0, 0).applyQuaternion(cameraQuaternion).applyQuaternion(rootInverse).normalize();
+  const familyViewUp = new THREE.Vector3(0, 1, 0).applyQuaternion(cameraQuaternion).applyQuaternion(rootInverse).normalize();
   const familyNormal = person => {
     const chart = familyChart(person);
     return chart
@@ -2982,7 +3062,6 @@ function animate() {
   for (const flex of hangingFlexAnimations) {
     const canReach = Boolean(flex.reachTarget && relationshipGroup.visible
       && memberVisible(flex.person) && memberVisible(flex.reachTarget.person));
-    flex.reach = THREE.MathUtils.clamp(flex.reach + (canReach ? 1 : -1) * delta * 1.7, 0, 1);
     flex.tubeGroup.visible = memberVisible(flex.person);
     if (!flex.tubeGroup.visible) continue;
     const sourceGate = currentGatePoints[flex.person]?.get(flex.activeGate);
@@ -2992,28 +3071,104 @@ function animate() {
     const activeAnchor = familyPoint(flex.person, new THREE.Vector3(sourceGate.x, sourceGate.y, 3.3));
     if (!activeAnchor) continue;
     const startDelta = activeAnchor.clone().sub(basePoints[0]);
-    let endPoint = basePoints[basePoints.length - 1].clone();
+    const restEnd = basePoints[basePoints.length - 1].clone();
+    let target = null;
     let reachNormal = familyNormal(flex.person);
     if (canReach) {
       const targetPoint = currentGatePoints[flex.reachTarget.person]?.get(flex.reachTarget.gate);
       if (targetPoint) {
-        const target = familyPoint(flex.reachTarget.person, new THREE.Vector3(targetPoint.x, targetPoint.y, 3.3));
-        if (target) {
-          endPoint.lerp(target, THREE.MathUtils.smoothstep(flex.reach, 0, 1));
-          reachNormal = pairNormal(flex.person, flex.reachTarget.person);
-        }
+        target = familyPoint(flex.reachTarget.person, new THREE.Vector3(targetPoint.x, targetPoint.y, 3.3));
+        if (target) reachNormal = pairNormal(flex.person, flex.reachTarget.person);
       }
     }
-    const endDelta = endPoint.clone().sub(basePoints[basePoints.length - 1]);
+    if (!flex.tipPosition) flex.tipPosition = target && flex.locked ? target.clone() : restEnd.clone();
+    const flapAxis = reachNormal.clone().multiplyScalar(0.72).addScaledVector(familyViewRight, 0.68).normalize();
+    let twistAxis = flapAxis.clone().cross(reachNormal);
+    if (twistAxis.lengthSq() < 0.001) twistAxis.copy(familyViewUp);
+    else twistAxis.normalize();
+    if (target && flex.locked) {
+      flex.tipPosition.copy(target);
+    } else {
+      const magneticDelta = (target || restEnd).clone().sub(flex.tipPosition);
+      const magneticDistance = magneticDelta.length();
+      if (magneticDistance > 0.001) {
+        const direction = magneticDelta.multiplyScalar(1 / magneticDistance);
+        const strength = target
+          ? Math.min(150, magneticDistance * 1.35) * (0.72 + 0.28 * Math.exp(-magneticDistance / 360))
+          : Math.min(100, magneticDistance * 5.5);
+        flex.tipVelocity.addScaledVector(direction, strength * delta);
+        if (target) {
+          const fieldCurl = direction.clone().cross(reachNormal);
+          if (fieldCurl.lengthSq() > 0.001) {
+            fieldCurl.normalize();
+            flex.tipVelocity.addScaledVector(fieldCurl, Math.sin(elapsed * 2.4 + flex.phase) * strength * 0.12 * delta);
+          }
+        }
+      }
+      flex.tipVelocity.multiplyScalar(Math.exp(-(target ? 2.2 : 5.2) * delta));
+      flex.tipVelocity.clampLength(0, target ? 190 : 90);
+      flex.tipPosition.addScaledVector(flex.tipVelocity, delta);
+      if (target && flex.tipPosition.distanceTo(target) < 6) {
+        flex.locked = true;
+        if (flex.lockKey) {
+          lockedRelationshipLinks.add(flex.lockKey);
+          lockedRelationshipPairs.add(relationshipPairKey(flex.person, flex.reachTarget.person));
+        }
+        flex.tipPosition.copy(target);
+        flex.tipVelocity.set(0, 0, 0);
+      } else if (!target && flex.tipPosition.distanceTo(restEnd) < 0.6 && flex.tipVelocity.length() < 3) {
+        flex.tipPosition.copy(restEnd);
+        flex.tipVelocity.set(0, 0, 0);
+        flex.locked = false;
+      }
+    }
+    if (!target) flex.locked = false;
     const sway = Math.sin(elapsed * 2 * Math.PI / flex.duration + flex.phase);
+    const flutter = Math.cos(elapsed * 2 * Math.PI / (flex.duration * 0.78) + flex.phase * 1.7);
+    const endPoint = flex.tipPosition.clone();
+    if (!flex.locked) {
+      const tipAmplitude = flex.amplitude * (target ? 0.38 : 0.62);
+      endPoint.addScaledVector(flapAxis, sway * tipAmplitude);
+      endPoint.addScaledVector(twistAxis, flutter * tipAmplitude * 0.32);
+    }
+    const endDelta = endPoint.clone().sub(basePoints[basePoints.length - 1]);
     const points = basePoints.map((point, index) => {
       const t = index / (basePoints.length - 1);
       point.addScaledVector(startDelta, 1 - t).addScaledVector(endDelta, t);
-      point.addScaledVector(reachNormal, Math.sin(Math.PI * t) * sway * flex.amplitude);
+      const flop = flex.locked ? 0.14 : target ? 0.7 : 1;
+      const envelope = Math.sin(Math.PI * t) * flop;
+      point.addScaledVector(flapAxis, envelope * sway * flex.amplitude);
+      point.addScaledVector(twistAxis, envelope * flutter * flex.amplitude * 0.28);
       return point;
     });
-    updateDynamicTube(flex.wall, points);
-    updateDynamicTube(flex.core, points);
+    const fullChannelCurve = new THREE.CatmullRomCurve3(points, false, 'centripetal');
+    const renderPoints = target
+      ? Array.from({ length: 19 }, (_, index) => fullChannelCurve.getPointAt(index / 36))
+      : points;
+    const particlePathPoints = points.map(point => point.clone());
+    if (target) {
+      const gapStart = points[points.length - 1];
+      const gap = target.clone().sub(gapStart);
+      const gapLength = gap.length();
+      const fieldLift = Math.min(18, gapLength * 0.07);
+      for (let step = 1; step <= 6; step++) {
+        const t = step / 6;
+        particlePathPoints.push(gapStart.clone().lerp(target, t)
+          .addScaledVector(reachNormal, Math.sin(Math.PI * t) * fieldLift));
+      }
+    }
+    const particleCurve = new THREE.CatmullRomCurve3(particlePathPoints, false, 'centripetal');
+    const showFlow = Boolean(target && canReach
+      && flex.person.localeCompare(flex.reachTarget.person) < 0);
+    for (const particle of flex.flowParticles) {
+      particle.bead.visible = showFlow;
+      if (!particle.bead.visible) continue;
+      const progress = (elapsed * 0.27 + particle.phase) % 1;
+      particle.bead.position.copy(particleCurve.getPointAt(progress));
+      particle.material.color.copy(flex.particleSourceColor).lerp(flex.particleSinkColor, progress);
+    }
+    updateDynamicTube(flex.wall, renderPoints);
+    updateDynamicTube(flex.core, renderPoints);
   }
   ambientParticles.rotation.y = elapsed * 0.006;
   const ambientPositions = ambientParticles.geometry.attributes.position.array;
