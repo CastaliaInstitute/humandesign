@@ -1388,7 +1388,7 @@ function addCenterParticleAnimations(group, paths) {
     const centerId = center.getAttribute('data-center') || 'center';
     const color = node.getAttribute('data-base-fill')
       || node.style?.getPropertyValue('--chakra-color') || '#8bd8ff';
-    const count = centerId === 'sacral' ? 4 : center.getAttribute('data-defined') === 'true' ? 2 : 1;
+    const count = centerId === 'sacral' ? 12 : center.getAttribute('data-defined') === 'true' ? 2 : 1;
     for (let index = 0; index < count; index++) {
       const bead = new THREE.Group();
       const tint = new THREE.Color(color);
