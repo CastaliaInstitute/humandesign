@@ -1684,6 +1684,12 @@ function snapChannelEndpoints(points, gatePoints, fromGate, toGate) {
     if (Number.isFinite(distances[1])) {
       route = [];
       for (let index = 1; index >= 0; index = previous[index]) route.unshift(nodes[index]);
+    } else {
+      // Keep the original exterior SVG route if no visibility path was found;
+      // never substitute the straight line already known to cross a chakra.
+      route = points.map(point => ({ x: point.x, y: point.y }));
+      route[0] = start;
+      route[route.length - 1] = end;
     }
   }
   // Dense linear samples keep later interpolation close to the clear route.
@@ -2421,7 +2427,7 @@ function releaseGroup(group) {
 function getGatePoints(paths) {
   const result = new Map();
   result.obstacles = paths.filter(path => path.userData?.node?.classList.contains('center-shape'))
-    .flatMap(path => path.toShapes(true).map(shape => shape.getPoints(8)));
+    .flatMap(path => path.toShapes(true).map(shape => shape.getPoints(16)));
   result.routes = new Map();
   for (const path of paths) {
     const node = path.userData.node;
@@ -2431,6 +2437,23 @@ function getGatePoints(paths) {
     const points = path.subPaths[0].getPoints(20);
     if (!points.length) continue;
     const center = { x: (Math.min(...points.map(p => p.x)) + Math.max(...points.map(p => p.x))) / 2, y: (Math.min(...points.map(p => p.y)) + Math.max(...points.map(p => p.y))) / 2 };
+    // Use the transformed center outline, not an inset SVG marker, as
+    // the routing endpoint. An interior endpoint makes exterior routing fail.
+    const centerPath = paths.find(candidate => candidate.userData?.node?.classList.contains('center-shape')
+      && centerGroup(candidate.userData.node)?.dataset.center === gate.dataset.center);
+    const polygon = centerPath?.toShapes(true)[0]?.getPoints(16);
+    if (polygon?.length) {
+      let nearest = null, distance = Infinity;
+      for (let i = 0; i < polygon.length; i++) {
+        const a = polygon[i], b = polygon[(i + 1) % polygon.length];
+        const dx = b.x - a.x, dy = b.y - a.y;
+        const t = Math.max(0, Math.min(1, ((center.x - a.x) * dx + (center.y - a.y) * dy) / (dx * dx + dy * dy || 1)));
+        const point = { x: a.x + t * dx, y: a.y + t * dy };
+        const d = Math.hypot(point.x - center.x, point.y - center.y);
+        if (d < distance) { nearest = point; distance = d; }
+      }
+      if (nearest) { center.x = nearest.x; center.y = nearest.y; }
+    }
     result.set(+gate.dataset.gate, center);
   }
   return result;
