@@ -1799,6 +1799,13 @@ function addBodygraphSvgPlane(group, paths, activationVisibility = {}) {
     const gates = [...artwork.querySelectorAll('.gate[data-gate]')]
       .filter(gate => gate.dataset.center === center.dataset.center);
     if (!gates.length) return;
+    // Keep the chakra interior intact: only the boundary receives openings.
+    const fill = shape.cloneNode(true);
+    fill.removeAttribute('id');
+    fill.removeAttribute('mask');
+    fill.style.setProperty('stroke', 'none', 'important');
+    shape.before(fill);
+    shape.style.setProperty('fill', 'none', 'important');
     const mask = document.createElementNS(svgNS, 'mask');
     const id = 'threejs-gate-openings-' + index;
     mask.id = id;
@@ -1816,7 +1823,13 @@ function addBodygraphSvgPlane(group, paths, activationVisibility = {}) {
       const hole = document.createElementNS(svgNS, 'circle');
       hole.setAttribute('cx', marker.getAttribute('cx'));
       hole.setAttribute('cy', marker.getAttribute('cy'));
-      hole.setAttribute('r', '3');
+      const markerX = Number(marker.getAttribute('cx')), markerY = Number(marker.getAttribute('cy'));
+      const neighborDistance = Math.min(...gates.filter(other => other !== gate).map(other => {
+        const otherMarker = other.querySelector('.gate-marker');
+        return otherMarker ? Math.hypot(Number(otherMarker.getAttribute('cx')) - markerX, Number(otherMarker.getAttribute('cy')) - markerY) : Infinity;
+      }));
+      const openingWidth = Math.max(0.6, Math.min(2, neighborDistance * 0.45));
+      hole.setAttribute('r', String(openingWidth / 2));
       hole.setAttribute('fill', 'black');
       mask.append(hole);
       // Markers can sit inward from the outline (notably the throat).
@@ -1847,7 +1860,7 @@ function addBodygraphSvgPlane(group, paths, activationVisibility = {}) {
         const socket = document.createElementNS(svgNS, 'path');
         socket.setAttribute('d', 'M' + x + ',' + y + ' L' + (nearest.x + dx * 3) + ',' + (nearest.y + dy * 3));
         socket.setAttribute('stroke', 'black');
-        socket.setAttribute('stroke-width', '6');
+        socket.setAttribute('stroke-width', String(openingWidth));
         socket.setAttribute('stroke-linecap', 'round');
         socket.setAttribute('fill', 'none');
         mask.append(socket);
