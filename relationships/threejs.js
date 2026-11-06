@@ -115,13 +115,15 @@ const transitGroups = {};
 const familyGroups = {};
 let familyChildren = [];
 const hangingFlexAnimations = [];
-const includedFamilyMembers = new Set(['daniel']);
+const includedFamilyMembers = new Set(['daniel', 'camille']);
 const soloDanielRequested = new URLSearchParams(window.location.search).get('solo') === 'daniel';
 if (soloDanielRequested) {
+  includedFamilyMembers.delete('camille');
   document.querySelector('#showDaniel').checked = true;
   document.querySelector('#showCamille').checked = false;
 }
-let relationshipInteractionEnabled = false;
+let relationshipInteractionEnabled = includedFamilyMembers.size > 1;
+document.querySelector("#showBridges").checked = relationshipInteractionEnabled;
 const lockedRelationshipPairs = new Set();
 const lockedRelationshipLinks = new Set();
 const relationshipPairKey = (a, b) => [a, b].sort().join(':');
@@ -2646,6 +2648,9 @@ function makeTransitGroup(data, snapshot, natalGates, person) {
   return group;
 }
 function rebuildRelationship() {
+  const multipleCharts = includedFamilyMembers.size > 1;
+  relationshipInteractionEnabled = multipleCharts;
+  document.querySelector('#showBridges').checked = multipleCharts;
   selectedKey = null;
   clearHover();
   if (!sourceDocument || !loader) return;
@@ -3574,7 +3579,7 @@ document.querySelector('#showDaniel').addEventListener('change', e => {
   else includedFamilyMembers.delete('daniel');
   if (planeGroups.daniel) planeGroups.daniel.visible = e.target.checked;
   syncTransitGroupVisibility();
-  refreshRelationshipPairing();
+  if (sourceDocument && loader) rebuildRelationship();
   refreshFrontFamilyReading();
 });
 document.querySelector('#showCamille').addEventListener('change', e => {
@@ -3585,7 +3590,7 @@ document.querySelector('#showCamille').addEventListener('change', e => {
   else includedFamilyMembers.delete('camille');
   if (planeGroups.camille) planeGroups.camille.visible = e.target.checked;
   syncTransitGroupVisibility();
-  refreshRelationshipPairing();
+  if (sourceDocument && loader) rebuildRelationship();
   refreshFrontFamilyReading();
 });
 document.querySelector('#soloDaniel').addEventListener('click', () => soloFamilyMember('daniel'));
