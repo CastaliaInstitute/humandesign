@@ -2968,11 +2968,18 @@ let hoveredKey = null;
 let selectedKey = null;
 let highlightedKey = null;
 let highlighted = [];
+const gateSelectionRings = [];
 let touchStart = null;
 const activeTouchPointers = new Set();
 let multiTouchGesture = false;
 let lastTouchSelectionAt = -Infinity;
 function clearHighlight() {
+  for (const ring of gateSelectionRings) {
+    ring.removeFromParent();
+    ring.geometry.dispose();
+    ring.material.dispose();
+  }
+  gateSelectionRings.length = 0;
   for (const { mesh, material, highlightedMaterial, renderOrder } of highlighted) {
     mesh.material = material;
     mesh.renderOrder = renderOrder;
@@ -2987,6 +2994,23 @@ function applyHighlight(key) {
   clearHighlight();
   if (!key) return;
   highlightedKey = key;
+  const gateMatch = key.match(/^([^:]+):gate:(\d+)$/);
+  if (gateMatch) {
+    const person = gateMatch[1], gateNumber = Number(gateMatch[2]);
+    const people = person === 'reading' ? Object.keys(currentGatePoints) : [person];
+    for (const id of people) {
+      if (!familyMemberIsVisible(id)) continue;
+      const chart = planeGroups[id] || familyGroups[id]?.children.find(item => item.userData.chartPerson === id);
+      const point = currentGatePoints[id]?.get(gateNumber);
+      if (!chart || !point) continue;
+      const ring = new THREE.Mesh(new THREE.RingGeometry(4.3, 5.8, 40),
+        new THREE.MeshBasicMaterial({ color: '#ffe493', side: THREE.DoubleSide, depthTest: false, depthWrite: false, toneMapped: false }));
+      ring.position.set(point.x, point.y, 8);
+      ring.renderOrder = 100;
+      chart.add(ring);
+      gateSelectionRings.push(ring);
+    }
+  }
   const featureMatches = featureKey => {
     if (featureKey === key) return true;
     const match = key.match(/^reading:(gate|channel|center):(.+)$/);
@@ -3091,7 +3115,15 @@ function featureAt(clientX, clientY) {
   const rect = canvas.getBoundingClientRect();
   pointer.set(((clientX - rect.left) / rect.width) * 2 - 1, -((clientY - rect.top) / rect.height) * 2 + 1);
   raycaster.setFromCamera(pointer, camera);
-  return raycaster.intersectObject(chartRoot, true).find(intersection => intersection.object.userData.hoverTip);
+  const hits = raycaster.intersectObject(chartRoot, true).filter(intersection => {
+    if (!intersection.object.userData.hoverTip) return false;
+    for (let object = intersection.object; object; object = object.parent) {
+      if (!object.visible) return false;
+    }
+    return true;
+  });
+  // Gate sockets sit on channel ends: give the gate precedence at that spot.
+  return hits.find(hit => /:gate:\d+$/.test(hit.object.userData.hoverKey || '')) || hits[0];
 }
 function chartAt(clientX, clientY) {
   const rect = canvas.getBoundingClientRect();
