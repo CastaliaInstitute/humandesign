@@ -1822,10 +1822,23 @@ function addBodygraphSvgPlane(group, paths, activationVisibility = {}) {
       // Markers can sit inward from the outline (notably the throat).
       // Cut a short socket all the way through the nearest chakra boundary.
       const x = Number(marker.getAttribute('cx')), y = Number(marker.getAttribute('cy'));
-      const length = shape.getTotalLength();
+      // Work from XML attributes: detached SVG geometry APIs can throw
+      // on Safari before the artwork has ever been attached to a document.
+      let outline = [];
+      if (shape.localName === 'rect') {
+        const sx = Number(shape.getAttribute('x')), sy = Number(shape.getAttribute('y'));
+        const width = Number(shape.getAttribute('width')), height = Number(shape.getAttribute('height'));
+        outline = [[sx, sy], [sx + width, sy], [sx + width, sy + height], [sx, sy + height]];
+      } else {
+        const numbers = (shape.getAttribute('points') || shape.getAttribute('d') || '').match(/[-+]?(?:\d*\.)?\d+(?:e[-+]?\d+)?/gi)?.map(Number) || [];
+        for (let i = 0; i + 1 < numbers.length; i += 2) outline.push([numbers[i], numbers[i + 1]]);
+      }
       let nearest = null, distance = Infinity;
-      for (let sample = 0; sample <= 256; sample++) {
-        const point = shape.getPointAtLength(length * sample / 256);
+      for (let i = 0; i < outline.length; i++) {
+        const a = outline[i], b = outline[(i + 1) % outline.length];
+        const dx = b[0] - a[0], dy = b[1] - a[1];
+        const t = Math.max(0, Math.min(1, ((x - a[0]) * dx + (y - a[1]) * dy) / (dx * dx + dy * dy || 1)));
+        const point = { x: a[0] + t * dx, y: a[1] + t * dy };
         const d = Math.hypot(point.x - x, point.y - y);
         if (d < distance) { nearest = point; distance = d; }
       }
