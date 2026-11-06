@@ -105,6 +105,11 @@ const familyGroups = {};
 let familyChildren = [];
 const hangingFlexAnimations = [];
 const includedFamilyMembers = new Set(['daniel']);
+const soloDanielRequested = new URLSearchParams(window.location.search).get('solo') === 'daniel';
+if (soloDanielRequested) {
+  document.querySelector('#showDaniel').checked = true;
+  document.querySelector('#showCamille').checked = false;
+}
 let relationshipInteractionEnabled = false;
 const lockedRelationshipPairs = new Set();
 const lockedRelationshipLinks = new Set();
