@@ -1814,7 +1814,7 @@ function addBodygraphSvgPlane(group, paths, activationVisibility = {}, transitGa
     const gates = [...artwork.querySelectorAll('.gate[data-gate]')]
       .filter(gate => {
         if (gate.dataset.center !== center.dataset.center) return false;
-        if (transitGates.has(Number(gate.dataset.gate))) return true;
+        if (activationVisibility.allChannels || transitGates.has(Number(gate.dataset.gate))) return true;
         if (gate.dataset.state !== 'closed') return false;
         const types = (gate.getAttribute('data-activation') || '').toLowerCase().match(/\b(design|personality)\b/g) || [];
         return types.length === 0 || types.some(type => activationVisibility[type] !== false);
@@ -2310,6 +2310,36 @@ function extractLayer(doc, person, gates, activations = []) {
     if (!activationTypes.has(activation.gate)) activationTypes.set(activation.gate, new Set());
     if (type) activationTypes.get(activation.gate).add(type);
   }
+  keep.querySelectorAll('.gate[data-center]').forEach(gate => {
+    const marker = gate.querySelector('.gate-marker');
+    const shape = keep.querySelector('.center[data-center="' + gate.dataset.center + '"] .center-shape');
+    if (!marker?.hasAttribute('cx') || !shape) return;
+    const x = Number(marker.getAttribute('cx')), y = Number(marker.getAttribute('cy'));
+    let outline = [];
+    if (shape.localName === 'rect') {
+      const sx = Number(shape.getAttribute('x')), sy = Number(shape.getAttribute('y'));
+      const w = Number(shape.getAttribute('width')), h = Number(shape.getAttribute('height'));
+      outline = [[sx, sy], [sx + w, sy], [sx + w, sy + h], [sx, sy + h]];
+    } else {
+      const numbers = (shape.getAttribute('points') || shape.getAttribute('d') || '').match(/[-+]?(?:\d*\.)?\d+(?:e[-+]?\d+)?/gi)?.map(Number) || [];
+      for (let i = 0; i + 1 < numbers.length; i += 2) outline.push([numbers[i], numbers[i + 1]]);
+    }
+    let nearest = null, distance = Infinity;
+    for (let i = 0; i < outline.length; i++) {
+      const a = outline[i], b = outline[(i + 1) % outline.length];
+      const dx = b[0] - a[0], dy = b[1] - a[1];
+      const t = Math.max(0, Math.min(1, ((x - a[0]) * dx + (y - a[1]) * dy) / (dx * dx + dy * dy || 1)));
+      const point = { x: a[0] + t * dx, y: a[1] + t * dy };
+      const d = Math.hypot(point.x - x, point.y - y);
+      if (d < distance) { nearest = point; distance = d; }
+    }
+    if (!nearest) return;
+    gate.querySelectorAll('circle').forEach(circle => {
+      circle.setAttribute('cx', String(nearest.x));
+      circle.setAttribute('cy', String(nearest.y));
+    });
+    if (gate.hasAttribute('transform')) gate.setAttribute('transform', 'translate(' + nearest.x + ' 0) scale(0.7142857 1) translate(' + -nearest.x + ' 0)');
+  });
   keep.querySelectorAll('.gate').forEach(g => {
     const gate = +g.dataset.gate;
     g.setAttribute('data-state', gates.has(gate) ? 'closed' : 'open');
