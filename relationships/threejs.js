@@ -1785,6 +1785,44 @@ function addBodygraphSvgPlane(group, paths, activationVisibility = {}) {
       gate.querySelectorAll('.gate-marker').forEach(marker => marker.style.setProperty('opacity', '0', 'important'));
     }
   });
+  // Open the chakra boundary at activated gates; a marker alone does not
+  // remove the wall beneath the channel entrance.
+  const svgNS = 'http://www.w3.org/2000/svg';
+  let openingDefs = artwork.querySelector('defs');
+  if (!openingDefs) {
+    openingDefs = document.createElementNS(svgNS, 'defs');
+    artwork.prepend(openingDefs);
+  }
+  artwork.querySelectorAll('.center[data-center]').forEach((center, index) => {
+    const shape = center.querySelector('.center-shape');
+    if (!shape) return;
+    const gates = [...artwork.querySelectorAll('.gate[data-state="closed"]')]
+      .filter(gate => gate.dataset.center === center.dataset.center);
+    if (!gates.length) return;
+    const mask = document.createElementNS(svgNS, 'mask');
+    const id = 'threejs-gate-openings-' + index;
+    mask.id = id;
+    mask.setAttribute('maskUnits', 'userSpaceOnUse');
+    mask.setAttribute('x', '-1000');
+    mask.setAttribute('y', '-1000');
+    mask.setAttribute('width', '3000');
+    mask.setAttribute('height', '3000');
+    const background = document.createElementNS(svgNS, 'rect');
+    for (const [key, value] of Object.entries({ x: -1000, y: -1000, width: 3000, height: 3000, fill: 'white' })) background.setAttribute(key, String(value));
+    mask.append(background);
+    for (const gate of gates) {
+      const marker = gate.querySelector('.gate-marker');
+      if (!marker?.hasAttribute('cx')) continue;
+      const hole = document.createElementNS(svgNS, 'circle');
+      hole.setAttribute('cx', marker.getAttribute('cx'));
+      hole.setAttribute('cy', marker.getAttribute('cy'));
+      hole.setAttribute('r', '3');
+      hole.setAttribute('fill', 'black');
+      mask.append(hole);
+    }
+    openingDefs.append(mask);
+    shape.setAttribute('mask', 'url(#' + id + ')');
+  });
   artwork.querySelector('rect.canvas')?.remove();
   const style = [...artwork.querySelectorAll('style')].at(-1);
   if (style) style.textContent += `
