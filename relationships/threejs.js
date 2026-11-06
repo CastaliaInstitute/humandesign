@@ -41,7 +41,7 @@ controls.target.set(0, familyViewCenterY, 0);
 controls.minDistance = 330;
 controls.maxDistance = 1450;
 controls.minZoom = 0.45;
-controls.maxZoom = 4.5;
+controls.maxZoom = 12;
 // Allow vertical OrbitControls drags to tilt the family into a top or bottom
 // view; a small pole margin avoids the singularity at a perfectly vertical view.
 controls.minPolarAngle = 0.05;
