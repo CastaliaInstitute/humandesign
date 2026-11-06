@@ -41,7 +41,7 @@ controls.target.set(0, familyViewCenterY, 0);
 controls.minDistance = 330;
 controls.maxDistance = 1450;
 controls.minZoom = 0.45;
-controls.maxZoom = 3;
+controls.maxZoom = 4.5;
 // Allow vertical OrbitControls drags to tilt the family into a top or bottom
 // view; a small pole margin avoids the singularity at a perfectly vertical view.
 controls.minPolarAngle = 0.05;
@@ -1705,7 +1705,9 @@ function makePlaneGroup(paths, person, sharedChannels, relationshipChannels, opt
       const toGateNode = channel.ownerSVGElement?.querySelector(`.gate[data-gate="${channel.dataset.to}"]`);
       const fromActive = fromGateNode?.getAttribute('data-state') === 'closed';
       const toActive = toGateNode?.getAttribute('data-state') === 'closed';
-      const hanging = !active && fromActive !== toActive;
+      // Hanging is a per-channel gate state; a defined center does not stop
+      // an unmatched active gate on that center from flexing.
+      const hanging = fromActive !== toActive;
       const opacity = active ? (exactFrontAlignment ? 0.82 : 0.9) : hanging ? 0.48 : 0.13;
       const sharedOffset = exactFrontAlignment && active && sharedChannels.has(channelId) ? (person === 'daniel' ? -2.2 : 2.2) : 0;
       // Each SVG rail becomes a two-lane carriageway; the divider and dashed lane marks make the road legible in depth.
@@ -1769,6 +1771,14 @@ function makePlaneGroup(paths, person, sharedChannels, relationshipChannels, opt
         }
         const road = tubeFromPoints(points, active ? 1.45 : 0.64, roadMat, 2.4);
         if (road) { if (hover) Object.assign(road.userData, hover); group.add(road); }
+        if (!active && !hanging && hover) {
+          const hitMaterial = new THREE.MeshBasicMaterial({
+            color: '#ffffff', transparent: true, opacity: 0,
+            colorWrite: false, depthWrite: false, side: THREE.DoubleSide
+          });
+          const hitTube = tubeFromPoints(points, 5.5, hitMaterial, 2.45);
+          if (hitTube) { Object.assign(hitTube.userData, hover); group.add(hitTube); }
+        }
         if (active && points.length > 2) {
           const from = gatePoints.get(+channel.dataset.from);
           const startsAtFrom = from && Math.hypot(rawPoints[0].x - from.x, rawPoints[0].y - from.y) <= Math.hypot(rawPoints[rawPoints.length - 1].x - from.x, rawPoints[rawPoints.length - 1].y - from.y);
@@ -3135,7 +3145,7 @@ function animate() {
     const points = basePoints.map((point, index) => {
       const t = index / (basePoints.length - 1);
       point.addScaledVector(startDelta, 1 - t).addScaledVector(endDelta, t);
-      const flop = flex.locked ? 0.14 : target ? 0.7 : 1;
+      const flop = flex.locked ? 0 : target ? 0.7 : 1;
       const envelope = Math.sin(Math.PI * t) * flop;
       point.addScaledVector(flapAxis, envelope * sway * flex.amplitude);
       point.addScaledVector(twistAxis, envelope * flutter * flex.amplitude * 0.28);
