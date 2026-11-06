@@ -178,6 +178,7 @@ let readingMode = 'family';
 let readingViewKey = '';
 const generatedReadings = new Map();
 const flowAnimations = [];
+const systemChannelRoutes = [];
 const centerParticleAnimations = [];
 const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 let channelFlowEnabled = true;
@@ -1256,38 +1257,9 @@ function gradientTubesFromCurve(curve, radius, fromColor, toColor, dashed = fals
   return meshes;
 }
 function addFlowMotion(target, curve, color, hover = null, reverse = false, size = 1, phaseOffset = 0, particleCount = 1, transport = null) {
-  if (!curve) return;
-  const length = curve.getLength();
-  for (let index = 0; index < particleCount; index++) {
-    const bead = new THREE.Group();
-    const particleSize = size * (0.82 + Math.random() * 0.36);
-    const glowMaterial = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.38, depthWrite: false, toneMapped: false });
-    const glow = new THREE.Mesh(new THREE.SphereGeometry(1.9 * particleSize, 10, 8), glowMaterial);
-    const coreColor = new THREE.Color(color).lerp(new THREE.Color('#fffdf2'), 0.72);
-    const core = new THREE.Mesh(
-      new THREE.SphereGeometry(0.82 * particleSize, 10, 8),
-      new THREE.MeshBasicMaterial({ color: coreColor, toneMapped: false })
-    );
-    glow.renderOrder = 5;
-    core.renderOrder = 6;
-    bead.add(glow, core);
-    if (hover) {
-      Object.assign(bead.userData, hover);
-      Object.assign(glow.userData, hover);
-      Object.assign(core.userData, hover);
-    }
-    target.add(bead);
-    bead.visible = channelFlowEnabled;
-    const trainPhase = index / particleCount;
-    const phase = (trainPhase + phaseOffset + Math.random() * 0.035) % 1;
-    const speed = 22 + Math.random() * 10;
-    flowAnimations.push({
-      bead, glow, glowMaterial, curve, container: target, reverse, phase, transport,
-      progress: phase, state: 'plane', escapeAge: 0,
-      duration: THREE.MathUtils.clamp(length / speed, 0.9, 5.5)
-    });
-  }
+  if (curve) systemChannelRoutes.push({ container: target, curve, reverse, transport });
 }
+
 function pointInPolygon(x, y, polygon) {
   let inside = false;
   for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
@@ -1859,17 +1831,7 @@ function makePlaneGroup(paths, person, sharedChannels, relationshipChannels, opt
           const core = createDynamicTube(0.48, 0.85, false, 36, 6, sourceColor, sinkColor);
           const particleSourceColor = new THREE.Color(sourceColor);
           const particleSinkColor = new THREE.Color(sinkColor);
-          const flowParticles = Array.from({ length: 10 }, (_, index) => {
-            const material = new THREE.MeshBasicMaterial({
-              color: particleSourceColor, transparent: true, opacity: 0.96,
-              depthWrite: false, toneMapped: false
-            });
-            const bead = new THREE.Mesh(new THREE.SphereGeometry(1.15, 8, 6), material);
-            bead.visible = false;
-            bead.renderOrder = 5;
-            tubeGroup.add(bead);
-            return { bead, material, phase: index / 10 };
-          });
+          const flowParticles = [];
           if (hover) { Object.assign(wall.mesh.userData, hover); Object.assign(core.mesh.userData, hover); }
           tubeGroup.add(wall.mesh, core.mesh);
           const phase = [...channelId].reduce((sum, char) => sum + char.charCodeAt(0), 0);
@@ -2247,6 +2209,7 @@ function rebuildRelationship() {
   clearChartInitials();
   clearCenterParticleAnimations();
   flowAnimations.length = 0;
+  systemChannelRoutes.length = 0;
   hangingFlexAnimations.length = 0;
   releaseGroup(relationshipGroup);
   releaseGroup(hangingFlexContainer);
@@ -3360,6 +3323,11 @@ function animate() {
       }
     }
     const particleCurve = new THREE.CatmullRomCurve3(particlePathPoints, false, 'centripetal');
+    if (!flex.systemRoute) {
+      flex.systemRoute = { container: chartRoot, curve: particleCurve, reverse: false, person: flex.person, hanging: true };
+      systemChannelRoutes.push(flex.systemRoute);
+    }
+    flex.systemRoute.curve = particleCurve;
     const showFlow = channelFlowEnabled && (!target || (canReach
       && flex.person.localeCompare(flex.reachTarget.person) < 0));
     for (const particle of flex.flowParticles) {
@@ -3434,8 +3402,43 @@ function animate() {
   for (const particle of centerParticleAnimations) {
     particle.bead.visible = channelFlowEnabled && particle.container.visible;
     if (!channelFlowEnabled) continue;
-    if (particle.state === 'plane') {
+    if (particle.state === 'channel') {
+      const route = particle.channelRoute;
+      particle.channelDistance += delta * 28;
+      const progress = Math.min(1, particle.channelDistance / Math.max(1, route.curve.getLength()));
+      const point = route.curve.getPointAt(route.reverse ? 1 - progress : progress);
+      particle.bead.position.copy(particle.container.worldToLocal(route.container.localToWorld(point.clone())));
+      if (progress === 1) {
+        const world = particle.bead.getWorldPosition(new THREE.Vector3());
+        const receiver = centerParticleAnimations.find(other => {
+          const local = other.container.worldToLocal(world.clone());
+          return familyMemberIsVisible(other.container.userData.chartPerson)
+            && pointInPolygon(local.x, local.y, other.polygon);
+        });
+        if (receiver) {
+          receiver.container.attach(particle.bead);
+          particle.container = receiver.container;
+          particle.polygon = receiver.polygon.map(point => point.clone());
+          particle.state = 'plane';
+          particle.age = 0;
+          particle.escapeAt = 4 + Math.random() * 4;
+        } else releaseCenterParticleInto3D(particle);
+      }
+    } else if (particle.state === 'plane') {
       const position = particle.bead.position;
+      const world = particle.bead.getWorldPosition(new THREE.Vector3());
+      const route = systemChannelRoutes.find(route => {
+        if (route.hanging && route.person !== particle.container.userData.chartPerson) return false;
+        if (!route.hanging && route.container !== particle.container) return false;
+        const entry = route.container.localToWorld(route.curve.getPointAt(route.reverse ? 1 : 0).clone());
+        return entry.distanceTo(world) < 7;
+      });
+      if (route) {
+        particle.channelRoute = route;
+        particle.channelDistance = 0;
+        particle.state = 'channel';
+        continue;
+      }
       const nextX = position.x + particle.velocity.x * delta;
       const nextY = position.y + particle.velocity.y * delta;
       if (pointInPolygon(nextX, nextY, particle.polygon)) {
