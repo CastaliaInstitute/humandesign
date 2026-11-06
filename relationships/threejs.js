@@ -1463,7 +1463,7 @@ function addCenterParticleAnimations(group, paths) {
       bead.userData.centerParticle = true;
       group.add(bead);
       const particle = {
-        bead, glow, glowMaterial, container: group, centerId,
+        bead, glow, glowMaterial, coreMaterial, chakraColor: new THREE.Color(color), container: group, centerId,
         polygon: polygon.map(point => point.clone()), velocity: new THREE.Vector3(),
         state: 'plane', age: 0, escapeAt: 0, escapeVelocity: null,
         escapeDuration: 1.2 + Math.random() * 1.2
@@ -3875,6 +3875,9 @@ function animate() {
           receiver.container.attach(particle.bead);
           particle.container = receiver.container;
           particle.centerId = receiver.centerId;
+          particle.chakraColor.copy(receiver.chakraColor);
+          particle.glowMaterial.color.copy(particle.chakraColor);
+          particle.coreMaterial.color.copy(particle.chakraColor).lerp(new THREE.Color('#fffdf2'), 0.64);
           particle.polygon = receiver.polygon.map(point => point.clone());
           const center = particle.polygon.reduce((sum, p) => sum.add(p), new THREE.Vector2()).multiplyScalar(1 / particle.polygon.length);
           const inward = new THREE.Vector3(center.x - particle.bead.position.x, center.y - particle.bead.position.y, 0).normalize();
