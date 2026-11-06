@@ -2020,6 +2020,11 @@ function familyMemberIsVisible(person) {
   if (person === 'camille') return planeGroups.camille?.visible ?? true;
   return familyGroups[person]?.visible ?? true;
 }
+function syncTransitGroupVisibility() {
+  for (const [person, group] of Object.entries(transitGroups)) {
+    group.visible = transitToggle.checked && familyMemberIsVisible(person);
+  }
+}
 function familyPairsWithinReach() {
   chartRoot.updateMatrixWorld(true);
   const centerFor = person => {
@@ -2254,7 +2259,7 @@ function rebuildRelationship() {
       group.position.z = planeGroups[person].position.z;
       transitGroups[person] = group;
       chartRoot.add(group);
-      group.visible = transitToggle.checked;
+      group.visible = transitToggle.checked && familyMemberIsVisible(person);
     }
   }
   familyChildren.forEach((child, index) => {
@@ -2296,7 +2301,7 @@ function rebuildRelationship() {
       transitGroup.position.set(flipX ? 180 * childScale : -180 * childScale, chartFrameHeight * childScale, 0);
       transitGroups[child.id] = transitGroup;
       childPosition.add(transitGroup);
-      transitGroup.visible = transitToggle.checked;
+      transitGroup.visible = transitToggle.checked && familyMemberIsVisible(child.id);
     }
   });
   currentChartData = chartData;
@@ -2304,6 +2309,7 @@ function rebuildRelationship() {
   currentTransitSnapshot = activeTransitSnapshot;
   planeGroups.daniel.visible = document.querySelector('#showDaniel').checked;
   planeGroups.camille.visible = document.querySelector('#showCamille').checked;
+  syncTransitGroupVisibility();
   syncChartFacing();
   const overlapPairs = familyPairsWithinReach()
     .filter(([a, b]) => !relationshipMutedCharts.has(a) && !relationshipMutedCharts.has(b));
@@ -3003,6 +3009,7 @@ document.querySelector('#showDaniel').addEventListener('change', e => {
   if (e.target.checked) includedFamilyMembers.add('daniel');
   else includedFamilyMembers.delete('daniel');
   if (planeGroups.daniel) planeGroups.daniel.visible = e.target.checked;
+  syncTransitGroupVisibility();
   refreshRelationshipPairing();
   refreshFrontFamilyReading();
 });
@@ -3013,6 +3020,7 @@ document.querySelector('#showCamille').addEventListener('change', e => {
   if (e.target.checked) includedFamilyMembers.add('camille');
   else includedFamilyMembers.delete('camille');
   if (planeGroups.camille) planeGroups.camille.visible = e.target.checked;
+  syncTransitGroupVisibility();
   refreshRelationshipPairing();
   refreshFrontFamilyReading();
 });
