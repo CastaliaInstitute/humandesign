@@ -1767,7 +1767,7 @@ function describePathFeature(node, person, activationsByGate, transitSnapshot = 
 function lineMaterial(color, opacity=1) {
   return new THREE.MeshBasicMaterial({ color, transparent: opacity < 1, opacity, side: THREE.DoubleSide, depthWrite: false });
 }
-function addBodygraphSvgPlane(group, paths, activationVisibility = {}) {
+function addBodygraphSvgPlane(group, paths, activationVisibility = {}, transitGates = new Set()) {
   const svgRoot = paths.find(path => path.userData?.node)?.userData.node.ownerSVGElement;
   if (!svgRoot) return;
   const artwork = svgRoot.cloneNode(true);
@@ -1810,8 +1810,15 @@ function addBodygraphSvgPlane(group, paths, activationVisibility = {}) {
   artwork.querySelectorAll('.center[data-center]').forEach((center, index) => {
     const shape = center.querySelector('.center-shape');
     if (!shape) return;
+    shape.removeAttribute('mask');
     const gates = [...artwork.querySelectorAll('.gate[data-gate]')]
-      .filter(gate => gate.dataset.center === center.dataset.center);
+      .filter(gate => {
+        if (gate.dataset.center !== center.dataset.center) return false;
+        if (transitGates.has(Number(gate.dataset.gate))) return true;
+        if (gate.dataset.state !== 'closed') return false;
+        const types = (gate.getAttribute('data-activation') || '').toLowerCase().match(/\b(design|personality)\b/g) || [];
+        return types.length === 0 || types.some(type => activationVisibility[type] !== false);
+      });
     if (!gates.length) return;
     // Keep the chakra interior intact: only the boundary receives openings.
     const fill = shape.cloneNode(true);
@@ -1895,7 +1902,7 @@ function addBodygraphSvgPlane(group, paths, activationVisibility = {}) {
   if (style) style.textContent += `
     *,*::before,*::after{animation:none!important;transition:none!important}
     .channel-group,.channel-group *{transform:none!important;animation:none!important;transition:none!important}
-    .gate[data-state="open"] .gate-marker{fill:#000!important;stroke:#000!important;opacity:1!important;visibility:visible!important}
+    .gate[data-state="open"] .gate-marker{fill:none!important;stroke:none!important;opacity:0!important;visibility:hidden!important}
     .gate[data-state="closed"] .gate-marker{fill:#f5a742!important;stroke:#613b13!important;stroke-width:1!important;opacity:1!important;visibility:visible!important}
     .gate[data-state="closed"][data-activation*="design"] .gate-marker{stroke:#ff5968!important}
     .gate[data-state="closed"][data-activation*="personality"] .gate-marker{stroke:#419dff!important}
@@ -1944,7 +1951,7 @@ function makePlaneGroup(paths, person, sharedChannels, relationshipChannels, opt
   ].filter(type => type === 'design' || type === 'personality'));
   const activationTypesVisible = types => types.size === 0 || [...types].some(type => activationVisibility[type] !== false);
   addChartColorShadow(group, color);
-  addBodygraphSvgPlane(group, paths, activationVisibility);
+  addBodygraphSvgPlane(group, paths, activationVisibility, transitGates);
   group.userData.channelObstacles = paths.filter(path =>
     path.userData?.node?.getAttribute('class')?.split(/\s+/).includes('center-shape'))
     .flatMap(path => path.toShapes(true).map(shape => shape.getPoints(32)));
