@@ -118,6 +118,8 @@ let transitSnapshot = null;
 let transitDurationEstimates = [];
 let lifetimeTimelineActive = false;
 const transitToggle = document.querySelector('#showTransits');
+const designActivationToggle = document.querySelector('#showDesignActivations');
+const personalityActivationToggle = document.querySelector('#showPersonalityActivations');
 try {
   transitToggle.checked = localStorage.getItem('castalia-hd-show-transits') !== 'false';
 } catch {
@@ -425,8 +427,10 @@ function orientPlaneToCamera(group, scale, flipX, parentYaw = 0, centerZ = 0, pa
   group.position.set(0, familyViewCenterY, centerZ).sub(localChartCenter);
 }
 function syncChartFacing() {
+  const visiblePeople = Object.keys(currentNatalGates || {}).filter(familyMemberIsVisible);
+  const soloPerson = visiblePeople.length === 1 ? visiblePeople[0] : null;
   for (const person of ['daniel', 'camille']) {
-    const centerZ = person === frontPerson ? familyLayout.parentRadius : -familyLayout.parentRadius;
+    const centerZ = soloPerson ? 0 : person === frontPerson ? familyLayout.parentRadius : -familyLayout.parentRadius;
     const inward = new THREE.Vector3(0, 0, centerZ >= 0 ? -1 : 1);
     orientPlaneToCamera(planeGroups[person], familyLayout.parentScale, false, 0, centerZ, chartRoot, inward);
     orientPlaneToCamera(transitGroups[person], familyLayout.parentScale, false, 0, centerZ, chartRoot, inward);
@@ -434,6 +438,10 @@ function syncChartFacing() {
   familyChildren.forEach((child, index) => {
     const parent = familyGroups[child.id];
     if (!parent) return;
+    if (soloPerson === child.id) {
+      parent.position.set(0, 0, 0);
+      parent.rotation.y = 0;
+    }
     const chart = parent.children.find(item => item.name.includes('SVG plane'));
     orientPlaneToCamera(chart, familyLayout.childScale, false, parent.rotation.y, 0, parent, new THREE.Vector3(0, 0, 1));
     orientPlaneToCamera(transitGroups[child.id], familyLayout.childScale, false, parent.rotation.y, 0, parent, new THREE.Vector3(0, 0, 1));
@@ -1649,7 +1657,7 @@ function describePathFeature(node, person, activationsByGate, transitSnapshot = 
 function lineMaterial(color, opacity=1) {
   return new THREE.MeshBasicMaterial({ color, transparent: opacity < 1, opacity, side: THREE.DoubleSide, depthWrite: false });
 }
-function addBodygraphSvgPlane(group, paths) {
+function addBodygraphSvgPlane(group, paths, activationVisibility = {}) {
   const svgRoot = paths.find(path => path.userData?.node)?.userData.node.ownerSVGElement;
   if (!svgRoot) return;
   const artwork = svgRoot.cloneNode(true);
@@ -1674,6 +1682,12 @@ function addBodygraphSvgPlane(group, paths) {
   artwork.removeAttribute('role');
   artwork.removeAttribute('aria-labelledby');
   artwork.querySelectorAll('title,desc,text,script,.gate-number,.svg-tooltip,#gate-state-legend,#flow-control,#flow-direction-legend').forEach(node => node.remove());
+  artwork.querySelectorAll('.gate[data-state="closed"]').forEach(gate => {
+    const types = (gate.getAttribute('data-activation') || '').toLowerCase().match(/\b(design|personality)\b/g) || [];
+    if (types.length && !types.some(type => activationVisibility[type] !== false)) {
+      gate.querySelectorAll('.gate-marker').forEach(marker => marker.style.setProperty('opacity', '0', 'important'));
+    }
+  });
   artwork.querySelector('rect.canvas')?.remove();
   const style = [...artwork.querySelectorAll('style')].at(-1);
   if (style) style.textContent += `
@@ -1721,8 +1735,14 @@ function makePlaneGroup(paths, person, sharedChannels, relationshipChannels, opt
     if (!activationsByGate.has(activation.gate)) activationsByGate.set(activation.gate, []);
     activationsByGate.get(activation.gate).push(activation);
   }
+  const activationVisibility = options.activationVisibility || { design: true, personality: true };
+  const gateActivationTypes = gate => new Set([
+    ...(activationsByGate.get(+gate) || []).map(activation => String(activation.type || '').toLowerCase()),
+    ...(sourceDocument?.querySelector(`.gate[data-gate="${gate}"]`)?.getAttribute('data-activation') || '').toLowerCase().match(/\b(design|personality)\b/g) || []
+  ].filter(type => type === 'design' || type === 'personality'));
+  const activationTypesVisible = types => types.size === 0 || [...types].some(type => activationVisibility[type] !== false);
   addChartColorShadow(group, color);
-  addBodygraphSvgPlane(group, paths);
+  addBodygraphSvgPlane(group, paths, activationVisibility);
   const gatePoints = getGatePoints(paths);
   for (const path of paths) {
     const node = path.userData.node;
@@ -1742,6 +1762,11 @@ function makePlaneGroup(paths, person, sharedChannels, relationshipChannels, opt
     const centerChannelCount = isCenterShape ? Number(center?.getAttribute('data-channel-count') || 0) : 0;
     const centerActiveGateCount = isCenterShape ? Number(center?.getAttribute('data-active-gate-count') || 0) : 0;
     const channelId = channel ? `${Math.min(+channel.dataset.from, +channel.dataset.to)}-${Math.max(+channel.dataset.from, +channel.dataset.to)}` : null;
+    const channelTypes = new Set([
+      ...(fromActive ? gateActivationTypes(channel.dataset.from) : []),
+      ...(toActive ? gateActivationTypes(channel.dataset.to) : [])
+    ]);
+    if (channel && (active || fromActive !== toActive) && !activationTypesVisible(channelTypes)) continue;
     const hover = describePathFeature(node, person, activationsByGate, options.transitSnapshot);
     if (hover && channelId && relationshipChannels.has(channelId)) {
       hover.hoverKey = `relationship:channel:${channelId}`;
@@ -1756,7 +1781,7 @@ function makePlaneGroup(paths, person, sharedChannels, relationshipChannels, opt
       // contributors remain visibly blue and pink instead of blending purple.
       // Hanging is a per-channel gate state; a defined center does not stop
       // an unmatched active gate on that center from flexing.
-      const hanging = channel?.dataset.defined !== 'true' && fromActive !== toActive;
+      const hanging = channel?.dataset.defined !== 'true' && !active && fromActive !== toActive;
       const opacity = active ? (exactFrontAlignment ? 0.82 : 0.9) : hanging ? 0.48 : 0.13;
       const sharedOffset = exactFrontAlignment && active && sharedChannels.has(channelId) ? (person === 'daniel' ? -2.2 : 2.2) : 0;
       // Each SVG rail becomes a two-lane carriageway; the divider and dashed lane marks make the road legible in depth.
@@ -1888,6 +1913,7 @@ function makePlaneGroup(paths, person, sharedChannels, relationshipChannels, opt
     if (path.subPaths?.length && (isGateMarker || isCenterShape)) {
       const gateActivations = gate ? (activationsByGate.get(+gate.dataset.gate) || []) : [];
       const transitActive = isGateMarker && gate && transitGates.has(+gate.dataset.gate);
+      if (isGateMarker && gateActive && !activationTypesVisible(gateActivationTypes(gate.dataset.gate))) continue;
       const gateFillColor = gateActivations.some(item => item.type === 'design')
         ? '#cf2943'
         : gateActivations.some(item => item.type === 'personality') ? '#24231f' : color;
@@ -2221,6 +2247,10 @@ function rebuildRelationship() {
   const natalGates = { daniel: danielGates, camille: camilleGates };
   familyChildren.forEach(child => { natalGates[child.id] = new Set(child.gates || []); });
   const activeTransitSnapshot = transitToggle.checked ? transitSnapshot : null;
+  const activationVisibility = {
+    design: designActivationToggle?.checked !== false,
+    personality: personalityActivationToggle?.checked !== false
+  };
   const sharedChannels = new Set([...sourceDocument.querySelectorAll('.channel-group[data-from][data-to]')]
     .filter(channel => danielGates.has(+channel.dataset.from) && danielGates.has(+channel.dataset.to) && camilleGates.has(+channel.dataset.from) && camilleGates.has(+channel.dataset.to))
     .map(channel => `${Math.min(+channel.dataset.from, +channel.dataset.to)}-${Math.max(+channel.dataset.from, +channel.dataset.to)}`));
@@ -2267,6 +2297,7 @@ function rebuildRelationship() {
     const group = makePlaneGroup(data.paths, person, sharedChannels, relationshipChannels, {
       scale: familyLayout.parentScale, transitSnapshot: activeTransitSnapshot,
       activeGates: natalGates[person],
+      activationVisibility,
       relationshipParticipants,
       relationshipReachTargets: relationshipReachTargets[person]
     });
@@ -2329,6 +2360,7 @@ function rebuildRelationship() {
     const childGroup = makePlaneGroup(childData.paths, child.id, new Set(), relationshipChannels, {
       color, name: child.name, scale: childScale, flipX, transitSnapshot: activeTransitSnapshot,
       activeGates: childGates,
+      activationVisibility,
       relationshipParticipants,
       relationshipReachTargets: relationshipReachTargets[child.id]
     });
@@ -2652,10 +2684,18 @@ function fitCameraToFamily(rect = canvas.getBoundingClientRect()) {
   const chartHeight = chartFrameHeight * familyLayout.parentScale;
   const halfWidth = chartSilhouetteWidth / 2;
   const persons = Object.keys(currentNatalGates || {}).filter(person => {
+    if (!includedFamilyMembers.has(person)) return false;
     if (person === 'daniel') return planeGroups.daniel?.visible ?? true;
     if (person === 'camille') return planeGroups.camille?.visible ?? true;
     return familyGroups[person]?.visible ?? true;
   });
+  if (persons.length === 1) {
+    chartRoot.updateWorldMatrix(true, false);
+    const center = chartRoot.localToWorld(chartPointInFamily({ x: 180, y: chartFrameHeight / 2 }, persons[0]));
+    const shift = center.sub(controls.target);
+    camera.position.add(shift);
+    controls.target.add(shift);
+  }
   chartRoot.updateMatrixWorld(true);
   camera.updateMatrixWorld(true);
   const cameraRight = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
@@ -3084,6 +3124,11 @@ document.querySelector('#soloCamille').addEventListener('click', () => soloFamil
 const autoRotateToggle = document.querySelector('#autoRotateToggle');
 autoRotateToggle.checked = autoRotate;
 autoRotateToggle.addEventListener('change', event => { autoRotate = event.target.checked; });
+for (const toggle of [designActivationToggle, personalityActivationToggle]) {
+  toggle?.addEventListener('change', () => {
+    if (sourceDocument && loader) rebuildRelationship();
+  });
+}
 const animateFlowToggle = document.querySelector('#animateFlow');
 animateFlowToggle.checked = channelFlowEnabled;
 animateFlowToggle.addEventListener('change', event => {
