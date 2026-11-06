@@ -1683,7 +1683,11 @@ function makePlaneGroup(paths, person, sharedChannels, relationshipChannels, opt
     const gate = gateGroup(node);
     const center = centerGroup(node);
     const cls = node.getAttribute('class') || '';
-    const active = channel?.getAttribute('data-defined') === 'true';
+    const fromGateNode = channel?.ownerSVGElement?.querySelector(`.gate[data-gate="${channel.dataset.from}"]`);
+    const toGateNode = channel?.ownerSVGElement?.querySelector(`.gate[data-gate="${channel.dataset.to}"]`);
+    const fromActive = fromGateNode?.getAttribute('data-state') === 'closed';
+    const toActive = toGateNode?.getAttribute('data-state') === 'closed';
+    const active = Boolean(channel && fromActive && toActive);
     const gateActive = gate?.getAttribute('data-state') === 'closed';
     const centerActive = center?.getAttribute('data-defined') === 'true';
     const isChannel = cls.split(/\s+/).includes('channel');
@@ -1701,10 +1705,6 @@ function makePlaneGroup(paths, person, sharedChannels, relationshipChannels, opt
       const roadColor = color;
       // In exact front view, separate shared tracks by a few pixels so both
       // contributors remain visibly blue and pink instead of blending purple.
-      const fromGateNode = channel.ownerSVGElement?.querySelector(`.gate[data-gate="${channel.dataset.from}"]`);
-      const toGateNode = channel.ownerSVGElement?.querySelector(`.gate[data-gate="${channel.dataset.to}"]`);
-      const fromActive = fromGateNode?.getAttribute('data-state') === 'closed';
-      const toActive = toGateNode?.getAttribute('data-state') === 'closed';
       // Hanging is a per-channel gate state; a defined center does not stop
       // an unmatched active gate on that center from flexing.
       const hanging = fromActive !== toActive;
@@ -1742,7 +1742,7 @@ function makePlaneGroup(paths, person, sharedChannels, relationshipChannels, opt
           const core = createDynamicTube(0.78, 0.95, false, 36, 6, sourceColor, sinkColor);
           const particleSourceColor = new THREE.Color(sourceColor);
           const particleSinkColor = new THREE.Color(sinkColor);
-          const flowParticles = Array.from({ length: 4 }, (_, index) => {
+          const flowParticles = Array.from({ length: 10 }, (_, index) => {
             const material = new THREE.MeshBasicMaterial({
               color: particleSourceColor, transparent: true, opacity: 0.96,
               depthWrite: false, toneMapped: false
@@ -1751,7 +1751,7 @@ function makePlaneGroup(paths, person, sharedChannels, relationshipChannels, opt
             bead.visible = false;
             bead.renderOrder = 5;
             tubeGroup.add(bead);
-            return { bead, material, phase: index / 4 };
+            return { bead, material, phase: index / 10 };
           });
           if (hover) { Object.assign(wall.mesh.userData, hover); Object.assign(core.mesh.userData, hover); }
           tubeGroup.add(wall.mesh, core.mesh);
