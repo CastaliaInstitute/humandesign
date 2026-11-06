@@ -1799,8 +1799,12 @@ function makePlaneGroup(paths, person, sharedChannels, relationshipChannels, opt
           const openPoint = gatePoints.get(openGate);
           const startsAtActive = Math.hypot(rawPoints[0].x - activePoint.x, rawPoints[0].y - activePoint.y)
             <= Math.hypot(rawPoints[rawPoints.length - 1].x - activePoint.x, rawPoints[rawPoints.length - 1].y - activePoint.y);
-          const route = (startsAtActive ? rawPoints : [...rawPoints].reverse())
-            .map(point => new THREE.Vector3(point.x, point.y, 2.4));
+          const fullRoute = (startsAtActive ? rawPoints : [...rawPoints].reverse())
+            .map(point => new THREE.Vector3(point.x, point.y, 3.3));
+          // A hanging gate owns only its half of the channel. Never place its
+          // moving free end at the opposite center's fixed gate.
+          const hangingCurve = new THREE.CatmullRomCurve3(fullRoute, false, 'centripetal');
+          const route = Array.from({ length: 19 }, (_, index) => hangingCurve.getPointAt(index / 36));
           const colorForGate = (svgRoot, gate) => {
             const gateNode = svgRoot?.querySelector(`.gate[data-gate="${gate}"]`);
             const centerShape = gateNode && svgRoot?.querySelector(`.center[data-center="${gateNode.dataset.center}"] .center-shape`);
@@ -3321,9 +3325,10 @@ function animate() {
     const endDelta = endPoint.clone().sub(basePoints[basePoints.length - 1]);
     const points = basePoints.map((point, index) => {
       const t = index / (basePoints.length - 1);
-      point.addScaledVector(startDelta, 1 - t).addScaledVector(endDelta, t);
+      const bend = THREE.MathUtils.smoothstep(t, 0.18, 1);
+      point.addScaledVector(startDelta, 1 - bend).addScaledVector(endDelta, bend);
       const flop = flex.locked ? 0 : target ? 0.7 : 1;
-      const envelope = Math.sin(Math.PI * t) * flop;
+      const envelope = Math.sin(Math.PI * bend) * flop;
       point.addScaledVector(flapAxis, envelope * sway * flex.amplitude);
       point.addScaledVector(twistAxis, envelope * flutter * flex.amplitude * 0.28);
       return point;
