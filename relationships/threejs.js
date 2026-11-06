@@ -115,13 +115,15 @@ const transitGroups = {};
 const familyGroups = {};
 let familyChildren = [];
 const hangingFlexAnimations = [];
-const includedFamilyMembers = new Set(['daniel', 'camille']);
-const soloDanielRequested = new URLSearchParams(window.location.search).get('solo') === 'daniel';
-if (soloDanielRequested) {
-  includedFamilyMembers.delete('camille');
-  document.querySelector('#showDaniel').checked = true;
-  document.querySelector('#showCamille').checked = false;
-}
+// Shareable presets: solo (default), partner, or all loaded family members.
+const viewParams = new URLSearchParams(window.location.search);
+const requestedView = viewParams.get('view') || 'solo';
+const initialView = ['solo', 'partner', 'family'].includes(requestedView) ? requestedView : 'solo';
+const requestedPerson = (viewParams.get('solo') || viewParams.get('person') || 'daniel').toLowerCase();
+const initialPerson = ['daniel', 'camille'].includes(requestedPerson) ? requestedPerson : 'daniel';
+const includedFamilyMembers = new Set(initialView === 'solo' ? [initialPerson] : ['daniel', 'camille']);
+document.querySelector('#showDaniel').checked = includedFamilyMembers.has('daniel');
+document.querySelector('#showCamille').checked = includedFamilyMembers.has('camille');
 let relationshipInteractionEnabled = includedFamilyMembers.size > 1;
 document.querySelector("#showBridges").checked = relationshipInteractionEnabled;
 const lockedRelationshipPairs = new Set();
@@ -2889,6 +2891,9 @@ window.addEventListener('castalia-family-children-updated', event => {
   const nextIds = new Set(nextChildren.map(child => child.id));
   for (const id of previousIds) if (!nextIds.has(id)) includedFamilyMembers.delete(id);
   familyChildren = nextChildren;
+  if (initialView === 'family') {
+    for (const child of familyChildren) if (!previousIds.has(child.id)) includedFamilyMembers.add(child.id);
+  }
   familyChildren.forEach((child, index) => { window.hdChartNames[child.id] = child.name || `Child ${index + 1}`; });
   renderFamilyMemberOptions();
   if (sourceDocument && loader) { rebuildRelationship(); resize(); }
@@ -3505,6 +3510,7 @@ async function init() {
     }
     loader = new SVGLoader();
     if (Array.isArray(window.hdRelationshipChildren)) familyChildren = window.hdRelationshipChildren;
+    if (initialView === 'family') familyChildren.forEach(child => includedFamilyMembers.add(child.id));
     familyChildren.forEach((child, index) => {
       window.hdChartNames[child.id] = child.name || `Child ${index + 1}`;
     });
