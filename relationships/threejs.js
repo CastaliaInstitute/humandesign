@@ -1315,6 +1315,29 @@ function updateDynamicTube(tube, points) {
   if (points.length < 2) return;
   const curve = new THREE.CatmullRomCurve3(points, false, 'centripetal');
   const { tubularSegments, radialSegments, radius, geometry } = tube;
+  if (!tube.stroke) {
+    const material = new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: tube.mesh.material.opacity, depthWrite: false, toneMapped: false });
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.Float32BufferAttribute(new Float32Array((tubularSegments + 1) * 3), 3));
+    const colors = new Float32Array((tubularSegments + 1) * 3);
+    const original = tube.geometry.getAttribute('color');
+    for (let i = 0; i <= tubularSegments; i++) {
+      const index = i * (radialSegments + 1);
+      colors.set([original.getX(index), original.getY(index), original.getZ(index)], i * 3);
+    }
+    geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    tube.stroke = new THREE.Line(geometry, material);
+    tube.stroke.userData = { ...tube.mesh.userData };
+    tube.mesh.add(tube.stroke);
+    tube.mesh.material.colorWrite = false;
+  }
+  const strokePositions = tube.stroke.geometry.getAttribute('position');
+  for (let i = 0; i <= tubularSegments; i++) {
+    const point = curve.getPointAt(i / tubularSegments);
+    strokePositions.setXYZ(i, point.x, point.y, point.z);
+  }
+  strokePositions.needsUpdate = true;
+  tube.stroke.geometry.computeBoundingSphere();
   const frames = curve.computeFrenetFrames(tubularSegments, false);
   const position = geometry.getAttribute('position');
   const point = new THREE.Vector3(), vertex = new THREE.Vector3();
@@ -3936,6 +3959,32 @@ function animate() {
     particle.glow.scale.setScalar(pulse);
     particle.glowMaterial.opacity = 0.2 + pulse * 0.25;
   }
+  // Native WebGL lines stay one pixel wide regardless of zoom.
+  chartRoot.traverse(object => {
+    if (!object.isMesh || object.userData.thinStrokeConverted || !object.geometry) return;
+    const geometry = object.geometry, parameters = geometry.parameters;
+    const materials = Array.isArray(object.material) ? object.material : [object.material];
+    if (materials.every(material => material.colorWrite === false || material.opacity === 0)) return;
+    let points = null, loop = false;
+    if (geometry.type === 'RingGeometry') {
+      const radius = (parameters.innerRadius + parameters.outerRadius) / 2;
+      points = Array.from({ length: 48 }, (_, i) => new THREE.Vector3(Math.cos(i / 48 * Math.PI * 2) * radius, Math.sin(i / 48 * Math.PI * 2) * radius, 0));
+      loop = true;
+    } else if (geometry.type === 'TubeGeometry' && parameters.radius < 3) {
+      points = parameters.path.getPoints(parameters.tubularSegments);
+    }
+    if (!points) return;
+    const lineGeometry = new THREE.BufferGeometry().setFromPoints(points);
+    const original = materials[0];
+    const material = new THREE.LineBasicMaterial({ color: original.color, opacity: original.opacity, transparent: original.transparent, depthTest: original.depthTest, depthWrite: false, toneMapped: false });
+    const stroke = loop ? new THREE.LineLoop(lineGeometry, material) : new THREE.Line(lineGeometry, material);
+    stroke.userData = { ...object.userData };
+    stroke.renderOrder = object.renderOrder;
+    object.userData.thinStrokeConverted = true;
+    object.material = original.clone();
+    object.material.colorWrite = false;
+    object.add(stroke);
+  });
   renderer.render(scene, camera);
   requestAnimationFrame(animate);
 }
