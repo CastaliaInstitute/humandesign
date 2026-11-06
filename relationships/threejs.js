@@ -1228,7 +1228,7 @@ function channelSidePoints(points, side, normal = new THREE.Vector3(0, 0, 1)) {
 }
 function separateHangingChannels(points, flex, neighbors) {
   if (flex.locked) return points;
-  const clearance = 9; // Includes both tube walls and a visible gap.
+  const clearance = 16; // Keep tube walls and free tips visibly separated.
   return points.map((point, index) => {
     const weight = THREE.MathUtils.smoothstep(index / (points.length - 1), 0.18, 0.5);
     if (!weight) return point;
@@ -1255,7 +1255,7 @@ function separateHangingChannels(points, flex, neighbors) {
       } else direction.multiplyScalar(1 / distance);
       push.addScaledVector(direction, (clearance - distance) * 0.65);
     }
-    push.clampLength(0, 4);
+    push.clampLength(0, 8);
     return point.clone().addScaledVector(push, weight);
   });
 }
@@ -1270,8 +1270,9 @@ function avoidHangingObstacles(points, flex) {
     const point = curve.getPointAt(index / 72);
     if (index === 0) return point;
     const local = chart.worldToLocal(chartRoot.localToWorld(point.clone()));
-    // Preserve the short socket where the tube emerges from its own gate.
-    if (anchor && Math.hypot(local.x - anchor.x, local.y - anchor.y) < 7) return point;
+    // Only the exact attachment is exempt. Free ends can loop back near
+    // their own gate and must still obey the chakra boundary.
+    const socketClearance = THREE.MathUtils.lerp(0, 10, THREE.MathUtils.smoothstep(index / 72, 0, 0.2));
     for (let pass = 0; pass < 3; pass++) {
       for (const polygon of polygons) {
         let closest = null, distance = Infinity;
@@ -1284,7 +1285,7 @@ function avoidHangingObstacles(points, flex) {
           if (d < distance) { distance = d; closest = edge; }
         }
         const inside = pointInPolygon(local.x, local.y, polygon);
-        if (closest && (inside || distance < 5)) {
+        if (closest && (inside || distance < socketClearance)) {
           const direction = new THREE.Vector2(local.x - closest.x, local.y - closest.y);
           if (inside) direction.negate();
           if (direction.lengthSq() < 1e-8) {
@@ -1292,16 +1293,16 @@ function avoidHangingObstacles(points, flex) {
             direction.copy(closest).sub(center);
           }
           direction.normalize();
-          local.x = closest.x + direction.x * 5;
-          local.y = closest.y + direction.y * 5;
+          local.x = closest.x + direction.x * socketClearance;
+          local.y = closest.y + direction.y * socketClearance;
         }
       }
       for (const [gate, location] of gates) {
         if (gate === flex.activeGate) continue;
         const direction = new THREE.Vector2(local.x - location.x, local.y - location.y);
-        if (direction.length() < 7) {
+        if (direction.length() < 10) {
           if (direction.lengthSq() < 1e-8) direction.set(1, 0);
-          direction.normalize().multiplyScalar(7);
+          direction.normalize().multiplyScalar(10);
           local.x = location.x + direction.x;
           local.y = location.y + direction.y;
         }
@@ -1913,6 +1914,20 @@ function makePlaneGroup(paths, person, sharedChannels, relationshipChannels, opt
           // moving free end at the opposite center's fixed gate.
           const hangingCurve = new THREE.CatmullRomCurve3(fullRoute, false, 'centripetal');
           const route = Array.from({ length: 19 }, (_, index) => hangingCurve.getPointAt(index / 36));
+          const sourcePolygon = (group.userData.channelObstacles || []).reduce((best, polygon) => {
+            const distance = Math.min(...polygon.map(point => Math.hypot(point.x - activePoint.x, point.y - activePoint.y)));
+            return !best || distance < best.distance ? { polygon, distance } : best;
+          }, null)?.polygon;
+          if (sourcePolygon) {
+            const centroid = sourcePolygon.reduce((sum, point) => sum.add(point), new THREE.Vector2()).multiplyScalar(1 / sourcePolygon.length);
+            const outward = new THREE.Vector3(activePoint.x - centroid.x, activePoint.y - centroid.y, 0).normalize();
+            const length = Math.max(18, Math.min(38, hangingCurve.getLength() * 0.5));
+            for (let index = 1; index < route.length; index++) {
+              const t = index / (route.length - 1);
+              const departure = route[0].clone().addScaledVector(outward, length * t);
+              route[index].lerp(departure, 0.75);
+            }
+          }
           const colorForGate = (svgRoot, gate) => {
             const gateNode = svgRoot?.querySelector(`.gate[data-gate="${gate}"]`);
             const centerShape = gateNode && svgRoot?.querySelector(`.center[data-center="${gateNode.dataset.center}"] .center-shape`);
