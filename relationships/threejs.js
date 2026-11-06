@@ -1186,6 +1186,16 @@ function createDynamicTube(radius, opacity, additive, tubularSegments = 36, radi
   mesh.userData.svgPart = true;
   return { mesh, geometry, radius, tubularSegments, radialSegments };
 }
+// Two narrow walls leave the channel interior clear for its particles.
+function channelSidePoints(points, side, normal = new THREE.Vector3(0, 0, 1)) {
+  return points.map((point, index) => {
+    const tangent = points[Math.min(index + 1, points.length - 1)].clone()
+      .sub(points[Math.max(0, index - 1)]).normalize();
+    const lateral = normal.clone().cross(tangent);
+    if (lateral.lengthSq() < 1e-6) lateral.set(1, 0, 0);
+    return point.clone().addScaledVector(lateral.normalize(), side * 2.6);
+  });
+}
 function updateDynamicTube(tube, points) {
   if (points.length < 2) return;
   const curve = new THREE.CatmullRomCurve3(points, false, 'centripetal');
@@ -1841,9 +1851,8 @@ function makePlaneGroup(paths, person, sharedChannels, relationshipChannels, opt
           activationHalo.renderOrder = 7;
           activationHalo.name = `${hangingType} hanging gate marker`;
           tubeGroup.add(activationHalo);
-          const wall = createDynamicTube(2.2, 0.34, true, 36, 8, sourceColor, sinkColor);
-          const core = createDynamicTube(0.78, 0.95, false, 36, 6, sourceColor, sinkColor);
-          const typeStripe = createDynamicTube(0.98, 0.98, false, 36, 5, hangingAccent, hangingAccent);
+          const wall = createDynamicTube(0.48, 0.85, false, 36, 6, sourceColor, sinkColor);
+          const core = createDynamicTube(0.48, 0.85, false, 36, 6, sourceColor, sinkColor);
           const particleSourceColor = new THREE.Color(sourceColor);
           const particleSinkColor = new THREE.Color(sinkColor);
           const flowParticles = Array.from({ length: 10 }, (_, index) => {
@@ -1851,17 +1860,17 @@ function makePlaneGroup(paths, person, sharedChannels, relationshipChannels, opt
               color: particleSourceColor, transparent: true, opacity: 0.96,
               depthWrite: false, toneMapped: false
             });
-            const bead = new THREE.Mesh(new THREE.SphereGeometry(2, 8, 6), material);
+            const bead = new THREE.Mesh(new THREE.SphereGeometry(1.15, 8, 6), material);
             bead.visible = false;
             bead.renderOrder = 5;
             tubeGroup.add(bead);
             return { bead, material, phase: index / 10 };
           });
           if (hover) { Object.assign(wall.mesh.userData, hover); Object.assign(core.mesh.userData, hover); }
-          tubeGroup.add(wall.mesh, core.mesh, typeStripe.mesh);
+          tubeGroup.add(wall.mesh, core.mesh);
           const phase = [...channelId].reduce((sum, char) => sum + char.charCodeAt(0), 0);
           hangingFlexAnimations.push({
-            tubeGroup, wall, core, typeStripe, route, chart: group, person, channelId,
+            tubeGroup, wall, core, route, chart: group, person, channelId,
             activeGate, openGate, activePoint, openPoint, reachTarget, activationHalo,
             hangingType,
             phase: (phase % 13) * 0.37,
@@ -1874,8 +1883,12 @@ function makePlaneGroup(paths, person, sharedChannels, relationshipChannels, opt
           });
           continue;
         }
-        const road = tubeFromPoints(points, active ? 1.45 : 0.64, roadMat, 2.4);
-        if (road) { if (hover) Object.assign(road.userData, hover); group.add(road); }
+        const centerline = points.map(point => new THREE.Vector3(point.x, point.y, 2.4));
+        for (const side of [-1, 1]) {
+          const rail = channelSidePoints(centerline, side);
+          const road = tubeFromPoints(rail, active ? 0.48 : 0.25, roadMat, 2.4);
+          if (road) { if (hover) Object.assign(road.userData, hover); group.add(road); }
+        }
         if (!active && !hanging && hover) {
           const hitMaterial = new THREE.MeshBasicMaterial({
             color: '#ffffff', transparent: true, opacity: 0,
@@ -1899,17 +1912,7 @@ function makePlaneGroup(paths, person, sharedChannels, relationshipChannels, opt
             ...channelTransport, exitGate: fromGate
           });
         }
-        if (active && points.length > 5) {
-          const divider = tubeFromPoints(points, 0.22, laneMat, 2.6);
-          if (divider) { if (hover) Object.assign(divider.userData, hover); group.add(divider); }
-          const dashCount = Math.max(5, Math.min(15, Math.floor(points.length / 2)));
-          for (let i = 0; i < dashCount; i += 2) {
-            const a = Math.floor(i / dashCount * (points.length - 1));
-            const b = Math.min(points.length - 1, a + Math.max(2, Math.floor(points.length / dashCount)));
-            const dash = tubeFromPoints(points.slice(a, b + 1), 0.17, laneMat, 2.7);
-            if (dash) { if (hover) Object.assign(dash.userData, hover); group.add(dash); }
-          }
-        }
+
       }
       continue;
     }
@@ -3350,8 +3353,8 @@ function animate() {
       }
     }
     const particleCurve = new THREE.CatmullRomCurve3(particlePathPoints, false, 'centripetal');
-    const showFlow = Boolean(target && canReach
-      && flex.person.localeCompare(flex.reachTarget.person) < 0);
+    const showFlow = channelFlowEnabled && (!target || (canReach
+      && flex.person.localeCompare(flex.reachTarget.person) < 0));
     for (const particle of flex.flowParticles) {
       particle.bead.visible = showFlow;
       if (!particle.bead.visible) continue;
@@ -3359,9 +3362,8 @@ function animate() {
       particle.bead.position.copy(particleCurve.getPointAt(progress));
       particle.material.color.copy(flex.particleSourceColor).lerp(flex.particleSinkColor, progress);
     }
-    updateDynamicTube(flex.wall, renderPoints);
-    updateDynamicTube(flex.core, renderPoints);
-    updateDynamicTube(flex.typeStripe, renderPoints);
+    updateDynamicTube(flex.wall, channelSidePoints(renderPoints, -1, reachNormal));
+    updateDynamicTube(flex.core, channelSidePoints(renderPoints, 1, reachNormal));
   }
   ambientParticles.rotation.y = elapsed * 0.006;
   const ambientPositions = ambientParticles.geometry.attributes.position.array;
