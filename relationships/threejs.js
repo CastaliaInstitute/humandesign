@@ -2723,6 +2723,14 @@ function rebuildRelationship() {
   }
   const chartData = {};
   for (const person of ['daniel', 'camille']) {
+    if (!includedFamilyMembers.has(person)) {
+      releaseGroup(planeGroups[person]);
+      // Preserve layout anchors without constructing hidden SVG meshes or particles.
+      planeGroups[person] = new THREE.Group();
+      planeGroups[person].visible = false;
+      chartRoot.add(planeGroups[person]);
+      continue;
+    }
     const natalActivations = window.hdNatalPlanetaryActivations?.[person] || [];
     const data = loader.parse(extractLayer(sourceDocument, person, natalGates[person], natalActivations));
     chartData[person] = data;
@@ -2757,7 +2765,7 @@ function rebuildRelationship() {
   }
   if (activeTransitSnapshot) {
     for (const person of ['daniel', 'camille']) {
-      if (!layersFor(person).transits) continue;
+      if (!includedFamilyMembers.has(person) || !layersFor(person).transits) continue;
       const natalGates = parseGateList(person === 'daniel' ? '#danielGates' : '#camilleGates');
       const activations = new Set([...natalGates, ...activeTransitSnapshot.gates]);
       const transitData = loader.parse(extractLayer(sourceDocument, person, activations, window.hdNatalPlanetaryActivations?.[person] || []));
@@ -2771,6 +2779,7 @@ function rebuildRelationship() {
     }
   }
   familyChildren.forEach((child, index) => {
+    if (!includedFamilyMembers.has(child.id)) return;
     const side = index % 2 === 0 ? 1 : -1;
     const childOrdinal = Math.floor(index / 2);
     const sideCount = side > 0 ? Math.ceil(familyChildren.length / 2) : Math.floor(familyChildren.length / 2);
@@ -3499,15 +3508,8 @@ function loadFeatureDescriptions(svgDocument) {
 async function init() {
   try {
     sourceDocument = await loadBodygraphTemplate('../bodygraph.svg?v=active-center-fill-20261106');
-    try {
-      const descriptionsResponse = await fetch('../bodygraph.svg?v=active-center-fill-20261106');
-      if (descriptionsResponse.ok) {
-        const descriptionsDocument = new DOMParser().parseFromString(await descriptionsResponse.text(), 'image/svg+xml');
-        if (!descriptionsDocument.querySelector('parsererror')) loadFeatureDescriptions(descriptionsDocument);
-      }
-    } catch (error) {
-      console.warn('Could not load optional gate/channel descriptions:', error);
-    }
+    // The rendered template retains its descriptions; avoid fetching/parsing it twice.
+    loadFeatureDescriptions(sourceDocument);
     loader = new SVGLoader();
     if (Array.isArray(window.hdRelationshipChildren)) familyChildren = window.hdRelationshipChildren;
     if (initialView === 'family') familyChildren.forEach(child => includedFamilyMembers.add(child.id));
