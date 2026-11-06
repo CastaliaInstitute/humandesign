@@ -1729,9 +1729,9 @@ function addBodygraphSvgPlane(group, paths, activationVisibility = {}) {
     .channel-group,.channel-group *{transform:none!important;animation:none!important;transition:none!important}
     .gate[data-state="open"] .gate-marker{fill:#000!important;stroke:#000!important;opacity:1!important;visibility:visible!important}
     .gate[data-state="closed"] .gate-marker{fill:#f5a742!important;stroke:#613b13!important;stroke-width:1!important;opacity:1!important;visibility:visible!important}
-    .gate[data-state="closed"][data-activation*="design"] .gate-marker{stroke:#c92d3a!important}
-    .gate[data-state="closed"][data-activation*="personality"] .gate-marker{stroke:#272923!important}
-    .gate[data-state="closed"][data-activation*="design"][data-activation*="personality"] .gate-marker{stroke:#7c3aed!important}`;
+    .gate[data-state="closed"][data-activation*="design"] .gate-marker{stroke:#ff5968!important}
+    .gate[data-state="closed"][data-activation*="personality"] .gate-marker{stroke:#419dff!important}
+    .gate[data-state="closed"][data-activation*="design"][data-activation*="personality"] .gate-marker{stroke:#c184ff!important}`;
   const markup = new XMLSerializer().serializeToString(artwork);
   const texture = new THREE.TextureLoader().load(`data:image/svg+xml;charset=utf-8,${encodeURIComponent(markup)}`);
   // The chart group flips its y axis to convert SVG's downward-positive
@@ -1757,7 +1757,7 @@ function makePlaneGroup(paths, person, sharedChannels, relationshipChannels, opt
   const owner = options.name || window.hdChartNames?.[person] || (person === 'daniel' ? 'Person 1' : person === 'camille' ? 'Person 2' : 'Child');
   group.name = `${owner} · ${person === 'daniel' ? 'blue' : person === 'camille' ? 'pink' : 'child'} SVG plane`;
   const color = options.color || chartColor(person);
-  const transitColor = new THREE.Color('#7c3aed');
+  const transitColor = new THREE.Color('#c0c7d2');
   const transitGates = new Set(options.transitSnapshot?.gates || []);
   // Use the same gate set that generated this person's extracted SVG. Reading
   // marker attributes back from SVGLoader nodes is unreliable across SVG
@@ -1820,7 +1820,9 @@ function makePlaneGroup(paths, person, sharedChannels, relationshipChannels, opt
       renderedChannels.add(channelId);
       // Keep each person's channels tinted by their chart color, including
       // open channels; lower opacity keeps the active paths in focus.
-      const roadColor = color;
+      const roadColor = channelTypes.has('design') && channelTypes.has('personality') ? '#c184ff'
+        : channelTypes.has('design') ? '#ff5968'
+          : channelTypes.has('personality') ? '#419dff' : color;
       // In exact front view, separate shared tracks by a few pixels so both
       // contributors remain visibly blue and pink instead of blending purple.
       // Hanging is a per-channel gate state; a defined center does not stop
@@ -1867,7 +1869,7 @@ function makePlaneGroup(paths, person, sharedChannels, relationshipChannels, opt
             : activeGateTypes.has('design') ? 'design'
               : activeGateTypes.has('personality') ? 'personality' : 'untyped';
           const hangingAccent = hangingType === 'design' ? '#ff5968'
-            : hangingType === 'personality' ? '#c0c7d2'
+            : hangingType === 'personality' ? '#419dff'
               : hangingType === 'both' ? '#c184ff' : '#eab64b';
           const sourceColor = hangingType === 'untyped' ? colorForGate(channel.ownerSVGElement, activeGate) : hangingAccent;
           const reachTarget = options.relationshipReachTargets?.get(channelId) || null;
@@ -1945,9 +1947,10 @@ function makePlaneGroup(paths, person, sharedChannels, relationshipChannels, opt
       const gateActivations = gate ? (activationsByGate.get(+gate.dataset.gate) || []) : [];
       const transitActive = isGateMarker && gate && transitGates.has(+gate.dataset.gate);
       if (isGateMarker && gateActive && !activationTypesVisible(gateActivationTypes(gate.dataset.gate))) continue;
-      const gateFillColor = gateActivations.some(item => item.type === 'design')
-        ? '#cf2943'
-        : gateActivations.some(item => item.type === 'personality') ? '#24231f' : color;
+      const gateDesign = gateActivations.some(item => item.type === 'design');
+      const gatePersonality = gateActivations.some(item => item.type === 'personality');
+      const gateFillColor = gateDesign && gatePersonality ? '#c184ff'
+        : gateDesign ? '#ff5968' : gatePersonality ? '#419dff' : color;
       const fillColor = isGateMarker ? (transitActive ? transitColor : gateActive ? gateFillColor : pale) : (centerActiveGateCount ? color : pale);
       const centerTintBase = exactFrontAlignment ? 0.08 : 0.12;
       const centerTintPerGate = exactFrontAlignment ? 0.055 : 0.07;
@@ -2220,7 +2223,7 @@ function makeTransitGroup(data, snapshot, natalGates, person) {
   const gatePoints = getGatePoints(data.paths);
   const transitGates = new Set(snapshot.gates);
   const activeGates = new Set([...natalGates, ...transitGates]);
-  const color = chartColor(person);
+  const color = new THREE.Color('#c0c7d2');
   const roadMaterial = lineMaterial(color, 0.96);
   for (const path of data.paths) {
     const node = path.userData.node;
