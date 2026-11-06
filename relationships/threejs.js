@@ -1656,7 +1656,16 @@ function addBodygraphSvgPlane(group, paths) {
   artwork.querySelectorAll('.channel-group').forEach(channel => {
     channel.querySelectorAll('.channel,.channel-core,.channel-highlight,.channel-flow,.channel-hit,.hanging-segments,.channel-open-ends')
       .forEach(path => path.style.opacity = '0');
+    channel.classList.remove('is-partial', 'is-hanging-flex', 'is-flowing', 'is-transit-defined');
+    channel.style.removeProperty('transform');
+    channel.style.removeProperty('transform-origin');
+    channel.style.removeProperty('transform-box');
   });
+  // This SVG is a static chart texture. Its source document carries CSS
+  // hanging-half animations from the interactive standalone BodyGraph; only
+  // the Three.js hanging-channel meshes should move in this view.
+  artwork.querySelectorAll('.physics-particle,.flow-dot,.hanging-active-half,.hanging-segments,.channel-arrowhead-layer')
+    .forEach(node => node.remove());
   artwork.setAttribute('width', '360');
   artwork.setAttribute('height', String(chartFrameHeight));
   artwork.removeAttribute('style');
@@ -1666,6 +1675,8 @@ function addBodygraphSvgPlane(group, paths) {
   artwork.querySelector('rect.canvas')?.remove();
   const style = [...artwork.querySelectorAll('style')].at(-1);
   if (style) style.textContent += `
+    *,*::before,*::after{animation:none!important;transition:none!important}
+    .channel-group,.channel-group *{transform:none!important;animation:none!important;transition:none!important}
     .gate[data-state="open"] .gate-marker{fill:#000!important;stroke:#000!important;opacity:1!important;visibility:visible!important}
     .gate[data-state="closed"] .gate-marker{fill:#f5a742!important;stroke:#613b13!important;stroke-width:1!important;opacity:1!important;visibility:visible!important}
     .gate[data-state="closed"][data-activation*="design"] .gate-marker{stroke:#c92d3a!important}
@@ -1743,7 +1754,7 @@ function makePlaneGroup(paths, person, sharedChannels, relationshipChannels, opt
       // contributors remain visibly blue and pink instead of blending purple.
       // Hanging is a per-channel gate state; a defined center does not stop
       // an unmatched active gate on that center from flexing.
-      const hanging = fromActive !== toActive;
+      const hanging = channel?.dataset.defined !== 'true' && fromActive !== toActive;
       const opacity = active ? (exactFrontAlignment ? 0.82 : 0.9) : hanging ? 0.48 : 0.13;
       const sharedOffset = exactFrontAlignment && active && sharedChannels.has(channelId) ? (person === 'daniel' ? -2.2 : 2.2) : 0;
       // Each SVG rail becomes a two-lane carriageway; the divider and dashed lane marks make the road legible in depth.
@@ -3142,6 +3153,13 @@ function animate() {
     return blended.lengthSq() > 0.001 ? blended.normalize() : low;
   };
   for (const flex of hangingFlexAnimations) {
+    const natalGatesForFlex = currentNatalGates?.[flex.person];
+    const isStillHanging = Boolean(natalGatesForFlex
+      && natalGatesForFlex.has(flex.activeGate) !== natalGatesForFlex.has(flex.openGate));
+    if (!isStillHanging) {
+      flex.tubeGroup.visible = false;
+      continue;
+    }
     const canReach = Boolean(flex.reachTarget && relationshipGroup.visible
       && memberVisible(flex.person) && memberVisible(flex.reachTarget.person));
     flex.tubeGroup.visible = memberVisible(flex.person);
