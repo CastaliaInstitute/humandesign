@@ -1480,8 +1480,31 @@ function offsetPathPoints(points, amount) {
     const after = points[Math.min(points.length - 1, index + 1)];
     const dx = after.x - before.x, dy = after.y - before.y;
     const length = Math.hypot(dx, dy) || 1;
-    return { x: point.x - dy / length * amount, y: point.y + dx / length * amount };
+    // Separate overlapping chart tracks through the channel body, but taper
+    // the offset to zero at both gate markers so every rail remains attached.
+    const progress = index / Math.max(1, points.length - 1);
+    const endpointTaper = Math.sin(Math.PI * progress);
+    return {
+      x: point.x - dy / length * amount * endpointTaper,
+      y: point.y + dx / length * amount * endpointTaper
+    };
   });
+}
+function snapChannelEndpoints(points, gatePoints, fromGate, toGate) {
+  if (points.length < 2) return points;
+  const from = gatePoints.get(+fromGate);
+  const to = gatePoints.get(+toGate);
+  if (!from || !to) return points;
+  const direct = Math.hypot(points[0].x - from.x, points[0].y - from.y)
+    + Math.hypot(points.at(-1).x - to.x, points.at(-1).y - to.y);
+  const reverse = Math.hypot(points[0].x - to.x, points[0].y - to.y)
+    + Math.hypot(points.at(-1).x - from.x, points.at(-1).y - from.y);
+  const start = direct <= reverse ? from : to;
+  const end = direct <= reverse ? to : from;
+  const aligned = points.map(point => ({ x: point.x, y: point.y }));
+  aligned[0] = { x: start.x, y: start.y };
+  aligned[aligned.length - 1] = { x: end.x, y: end.y };
+  return aligned;
 }
 function inquiryContext(key, title) {
   const gate = key.match(/(?:^|:)gate:(\d+)$/);
@@ -1724,7 +1747,9 @@ function makePlaneGroup(paths, person, sharedChannels, relationshipChannels, opt
       const activeGate = +channel.dataset[fromActive ? 'from' : 'to'];
       const activePoint = hanging ? gatePoints.get(activeGate) : null;
       for (const subPath of path.subPaths) {
-        const rawPoints = subPath.getPoints(16);
+        const rawPoints = snapChannelEndpoints(
+          subPath.getPoints(16), gatePoints, channel.dataset.from, channel.dataset.to
+        );
         const points = sharedOffset ? offsetPathPoints(rawPoints, sharedOffset) : rawPoints;
         if (hanging && activePoint) {
           const openGate = +channel.dataset[fromActive ? 'to' : 'from'];
