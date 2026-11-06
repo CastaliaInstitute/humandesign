@@ -2884,8 +2884,9 @@ const activeTouchPointers = new Set();
 let multiTouchGesture = false;
 let lastTouchSelectionAt = -Infinity;
 function clearHighlight() {
-  for (const { mesh, material, highlightedMaterial } of highlighted) {
+  for (const { mesh, material, highlightedMaterial, renderOrder } of highlighted) {
     mesh.material = material;
+    mesh.renderOrder = renderOrder;
     if (Array.isArray(highlightedMaterial)) highlightedMaterial.forEach(item => item.dispose?.());
     else highlightedMaterial.dispose?.();
   }
@@ -2913,14 +2914,25 @@ function applyHighlight(key) {
   chartRoot.traverse(object => {
     if (!object.material || !featureMatches(object.userData.hoverKey || '')) return;
     const original = object.material;
+    // Invisible raycast spheres should not become solid selection blobs.
+    if (!object.userData.svgPart && !object.userData.channelWall
+      && (Array.isArray(original) ? original : [original]).every(material => !material.colorWrite)) return;
+    const renderOrder = object.renderOrder;
     const highlightedMaterials = (Array.isArray(original) ? original : [original]).map(material => {
       const copy = material.clone();
-      if (copy.color) copy.color.lerp(new THREE.Color('#ffd166'), 0.62);
-      if ('opacity' in copy && copy.transparent) copy.opacity = Math.min(1, copy.opacity + 0.28);
+      copy.colorWrite = true;
+      copy.depthWrite = false;
+      copy.depthTest = false;
+      copy.vertexColors = false;
+      if (copy.color) copy.color.set('#ffe493');
+      copy.transparent = true;
+      copy.opacity = object.geometry?.type === 'ShapeGeometry' ? 0.3 : 1;
+      copy.needsUpdate = true;
       return copy;
     });
     object.material = Array.isArray(original) ? highlightedMaterials : highlightedMaterials[0];
-    highlighted.push({ mesh: object, material: original, highlightedMaterial: object.material });
+    object.renderOrder = 30;
+    highlighted.push({ mesh: object, material: original, highlightedMaterial: object.material, renderOrder });
   });
 }
 document.querySelector('#familyReadingBody').addEventListener('click', event => {
@@ -2938,7 +2950,7 @@ document.querySelector('#familyReadingBody').addEventListener('click', event => 
 });
 function clearHover() {
   hoveredKey = null;
-  tip.hidden = true;
+  if (!selectedKey) tip.hidden = true;
   canvas.style.cursor = 'grab';
   applyHighlight(selectedKey);
 }
