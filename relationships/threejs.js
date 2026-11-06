@@ -2007,7 +2007,19 @@ function makePlaneGroup(paths, person, sharedChannels, relationshipChannels, opt
         if (active && points.length > 2) {
           const from = gatePoints.get(+channel.dataset.from);
           const startsAtFrom = from && Math.hypot(rawPoints[0].x - from.x, rawPoints[0].y - from.y) <= Math.hypot(rawPoints[rawPoints.length - 1].x - from.x, rawPoints[rawPoints.length - 1].y - from.y);
-          const flowCurve = curveFromSvgSubPath(subPath, 4.3, startsAtFrom === false);
+          const flowCurve = new THREE.CatmullRomCurve3(
+            rawPoints.map(point => new THREE.Vector3(point.x, point.y, 3.3)), false, 'centripetal');
+          for (const gateNumber of [channel.dataset.from, channel.dataset.to]) {
+            const opening = gatePoints.get(+gateNumber);
+            if (!opening) continue;
+            const ring = new THREE.Mesh(new THREE.RingGeometry(2.6, 3.3, 24),
+              new THREE.MeshBasicMaterial({ color: roadColor, side: THREE.DoubleSide, depthTest: false, depthWrite: false }));
+            ring.position.set(opening.x, opening.y, 3.4);
+            ring.renderOrder = 8;
+            ring.userData.channelWall = true;
+            if (hover) Object.assign(ring.userData, hover);
+            group.add(ring);
+          }
           const [fromGate, toGate] = startsAtFrom === false
             ? [channel.dataset.to, channel.dataset.from]
             : [channel.dataset.from, channel.dataset.to];
@@ -3600,13 +3612,22 @@ function animate() {
         const world = particle.bead.getWorldPosition(new THREE.Vector3());
         const receiver = centerParticleAnimations.find(other => {
           const local = other.container.worldToLocal(world.clone());
+          const center = other.polygon.reduce((sum, p) => sum.add(p), new THREE.Vector2()).multiplyScalar(1 / other.polygon.length);
+          const inward = new THREE.Vector2(center.x - local.x, center.y - local.y).normalize().multiplyScalar(5);
           return familyMemberIsVisible(other.container.userData.chartPerson)
-            && pointInPolygon(local.x, local.y, other.polygon);
+            && (route.hanging || other.container.userData.chartPerson === route.container.userData.chartPerson)
+            && pointInPolygon(local.x + inward.x, local.y + inward.y, other.polygon);
         });
         if (receiver) {
           receiver.container.attach(particle.bead);
           particle.container = receiver.container;
           particle.polygon = receiver.polygon.map(point => point.clone());
+          const center = particle.polygon.reduce((sum, p) => sum.add(p), new THREE.Vector2()).multiplyScalar(1 / particle.polygon.length);
+          const inward = new THREE.Vector3(center.x - particle.bead.position.x, center.y - particle.bead.position.y, 0).normalize();
+          particle.bead.position.addScaledVector(inward, 5);
+          particle.bead.position.z = 5.2;
+          particle.velocity.copy(inward).multiplyScalar(9);
+          particle.channelCooldown = 2;
           particle.state = 'plane';
           particle.age = 0;
           particle.escapeAt = 4 + Math.random() * 4;
@@ -3615,7 +3636,8 @@ function animate() {
     } else if (particle.state === 'plane') {
       const position = particle.bead.position;
       const world = particle.bead.getWorldPosition(new THREE.Vector3());
-      const route = systemChannelRoutes.find(route => {
+      particle.channelCooldown = Math.max(0, (particle.channelCooldown || 0) - delta);
+      const route = !particle.channelCooldown && systemChannelRoutes.find(route => {
         if (route.hanging && route.person !== particle.container.userData.chartPerson) return false;
         if (!route.hanging && route.container.userData.chartPerson !== particle.container.userData.chartPerson) return false;
         const entry = route.container.localToWorld(route.curve.getPointAt(route.reverse ? 1 : 0).clone());
