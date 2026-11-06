@@ -1311,9 +1311,17 @@ function avoidHangingObstacles(points, flex) {
     return chartRoot.worldToLocal(chart.localToWorld(local));
   });
 }
+function constrainedPolyline(points) {
+  const curve = new THREE.CurvePath();
+  for (let i = 1; i < points.length; i++) {
+    if (points[i].distanceToSquared(points[i - 1]) > 1e-10)
+      curve.add(new THREE.LineCurve3(points[i - 1].clone(), points[i].clone()));
+  }
+  return curve;
+}
 function updateDynamicTube(tube, points) {
   if (points.length < 2) return;
-  const curve = new THREE.CatmullRomCurve3(points, false, 'centripetal');
+  const curve = constrainedPolyline(points);
   const { tubularSegments, radialSegments, radius, geometry } = tube;
   if (!tube.stroke) {
     const material = new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: tube.mesh.material.opacity, depthWrite: false, toneMapped: false });
@@ -3735,9 +3743,16 @@ function animate() {
         const advance = points[index].clone().sub(anchor).dot(forward);
         if (advance < minimumAdvance) points[index].addScaledVector(forward, minimumAdvance - advance);
         previousAdvance = Math.max(advance, minimumAdvance);
+        // Bound sideways deflection as well as forward progress. Abrupt
+        // collision pushes can otherwise make the two offset walls curl.
+        const step = points[index].clone().sub(points[index - 1]);
+        const forwardStep = Math.max(0.001, step.dot(forward));
+        const sideways = step.clone().addScaledVector(forward, -step.dot(forward));
+        sideways.clampLength(0, forwardStep * 0.65);
+        points[index].copy(points[index - 1]).addScaledVector(forward, forwardStep).add(sideways);
       }
     }
-    const fullChannelCurve = new THREE.CatmullRomCurve3(points, false, 'centripetal');
+    const fullChannelCurve = constrainedPolyline(points);
     const renderPoints = target
       ? Array.from({ length: 19 }, (_, index) => fullChannelCurve.getPointAt(index / 36))
       : points;
@@ -3754,7 +3769,7 @@ function animate() {
           .addScaledVector(reachNormal, Math.sin(Math.PI * t) * fieldLift));
       }
     }
-    const particleCurve = new THREE.CatmullRomCurve3(particlePathPoints, false, 'centripetal');
+    const particleCurve = constrainedPolyline(particlePathPoints);
     if (!flex.systemRoute) {
       flex.systemRoute = { container: chartRoot, curve: particleCurve, reverse: flex.isSink, person: flex.person, hanging: true, sourceCenter: flex.sourceCenter, activeCenter: flex.activeCenter };
       systemChannelRoutes.push(flex.systemRoute);
