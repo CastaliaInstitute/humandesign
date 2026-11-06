@@ -1796,7 +1796,7 @@ function addBodygraphSvgPlane(group, paths, activationVisibility = {}) {
   artwork.querySelectorAll('.center[data-center]').forEach((center, index) => {
     const shape = center.querySelector('.center-shape');
     if (!shape) return;
-    const gates = [...artwork.querySelectorAll('.gate[data-state="closed"]')]
+    const gates = [...artwork.querySelectorAll('.gate[data-gate]')]
       .filter(gate => gate.dataset.center === center.dataset.center);
     if (!gates.length) return;
     const mask = document.createElementNS(svgNS, 'mask');
@@ -1819,6 +1819,26 @@ function addBodygraphSvgPlane(group, paths, activationVisibility = {}) {
       hole.setAttribute('r', '3');
       hole.setAttribute('fill', 'black');
       mask.append(hole);
+      // Markers can sit inward from the outline (notably the throat).
+      // Cut a short socket all the way through the nearest chakra boundary.
+      const x = Number(marker.getAttribute('cx')), y = Number(marker.getAttribute('cy'));
+      const length = shape.getTotalLength();
+      let nearest = null, distance = Infinity;
+      for (let sample = 0; sample <= 256; sample++) {
+        const point = shape.getPointAtLength(length * sample / 256);
+        const d = Math.hypot(point.x - x, point.y - y);
+        if (d < distance) { nearest = point; distance = d; }
+      }
+      if (nearest) {
+        const dx = (nearest.x - x) / (distance || 1), dy = (nearest.y - y) / (distance || 1);
+        const socket = document.createElementNS(svgNS, 'path');
+        socket.setAttribute('d', 'M' + x + ',' + y + ' L' + (nearest.x + dx * 3) + ',' + (nearest.y + dy * 3));
+        socket.setAttribute('stroke', 'black');
+        socket.setAttribute('stroke-width', '6');
+        socket.setAttribute('stroke-linecap', 'round');
+        socket.setAttribute('fill', 'none');
+        mask.append(socket);
+      }
     }
     openingDefs.append(mask);
     shape.setAttribute('mask', 'url(#' + id + ')');
