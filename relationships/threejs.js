@@ -179,7 +179,9 @@ const flowAnimations = [];
 const centerParticleAnimations = [];
 const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 let channelFlowEnabled = true;
-let autoRotate = !reduceMotion;
+// Keep the solo chart still so the only visible structural motion is a
+// hanging channel's open end. Family rotation remains available on demand.
+let autoRotate = !reduceMotion && includedFamilyMembers.size > 1;
 const autoRotateSpeed = 0.035; // radians per second; one slow turn takes about three minutes
 const colors = {
   daniel: new THREE.Color('#1689d4'),
