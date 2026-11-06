@@ -2648,8 +2648,20 @@ function fitCameraToFamily(rect = canvas.getBoundingClientRect()) {
       projectedHalfHeight = Math.max(projectedHalfHeight, Math.abs(relative.dot(cameraUp)));
     }
   }
-  // Keep a single chart large in the default front view, then grow the camera
-  // framing only as needed to fit every visible chart in the tilted family.
+  // A solo chart should use the available viewport height, especially on
+  // portrait screens. Family views retain extra framing for all visible charts.
+  if (persons.length === 1) {
+    const fitHalfHeight = Math.max(projectedHalfHeight, projectedHalfWidth / aspect) * 1.08 + 4;
+    const fitHalfWidth = fitHalfHeight * aspect;
+    camera.left = -fitHalfWidth;
+    camera.right = fitHalfWidth;
+    camera.top = fitHalfHeight;
+    camera.bottom = -fitHalfHeight;
+    camera.zoom = 1;
+    camera.updateProjectionMatrix();
+    return;
+  }
+  // Grow the family framing only as needed to fit every visible chart.
   const fitHalfWidth = Math.max(
     chartWidth / 0.8,
     projectedHalfWidth * 1.28 + 8,
