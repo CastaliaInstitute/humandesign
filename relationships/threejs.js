@@ -1785,10 +1785,33 @@ function makePlaneGroup(paths, person, sharedChannels, relationshipChannels, opt
           };
           const sourceColor = colorForGate(channel.ownerSVGElement, activeGate);
           const sinkColor = colorForGate(sourceDocument?.documentElement, openGate);
+          const activeGateNode = channel.ownerSVGElement?.querySelector(`.gate[data-gate="${activeGate}"]`);
+          const activeGateTypes = new Set([
+            ...(activationsByGate.get(activeGate) || []).map(activation => String(activation.type || '').toLowerCase()),
+            ...(activeGateNode?.getAttribute('data-activation') || '').toLowerCase().match(/\b(design|personality)\b/g) || []
+          ]);
+          const hangingType = activeGateTypes.has('design') && activeGateTypes.has('personality')
+            ? 'both'
+            : activeGateTypes.has('design') ? 'design'
+              : activeGateTypes.has('personality') ? 'personality' : 'untyped';
+          const hangingAccent = hangingType === 'design' ? '#ff5968'
+            : hangingType === 'personality' ? '#f4f1e8'
+              : hangingType === 'both' ? '#c184ff' : '#eab64b';
           const reachTarget = options.relationshipReachTargets?.get(channelId) || null;
           const tubeGroup = new THREE.Group();
           hangingFlexContainer.add(tubeGroup);
           if (hover) Object.assign(tubeGroup.userData, hover);
+          const activationHalo = new THREE.Mesh(
+            new THREE.RingGeometry(2.1, 3.7, 24),
+            new THREE.MeshBasicMaterial({
+              color: hangingAccent, transparent: true, opacity: 0.96,
+              blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
+              depthWrite: false, toneMapped: false
+            })
+          );
+          activationHalo.renderOrder = 7;
+          activationHalo.name = `${hangingType} hanging gate marker`;
+          tubeGroup.add(activationHalo);
           const wall = createDynamicTube(2.2, 0.34, true, 36, 8, sourceColor, sinkColor);
           const core = createDynamicTube(0.78, 0.95, false, 36, 6, sourceColor, sinkColor);
           const particleSourceColor = new THREE.Color(sourceColor);
@@ -1809,7 +1832,8 @@ function makePlaneGroup(paths, person, sharedChannels, relationshipChannels, opt
           const phase = [...channelId].reduce((sum, char) => sum + char.charCodeAt(0), 0);
           hangingFlexAnimations.push({
             tubeGroup, wall, core, route, chart: group, person, channelId,
-            activeGate, openGate, activePoint, openPoint, reachTarget,
+            activeGate, openGate, activePoint, openPoint, reachTarget, activationHalo,
+            hangingType,
             phase: (phase % 13) * 0.37,
             amplitude: 8 + (phase % 5) * 2.2,
             duration: 2.7 + (phase % 7) * 0.23,
@@ -3184,6 +3208,8 @@ function animate() {
     if (basePoints.length < 2) continue;
     const activeAnchor = familyPoint(flex.person, new THREE.Vector3(sourceGate.x, sourceGate.y, 3.3));
     if (!activeAnchor) continue;
+    flex.activationHalo.position.copy(activeAnchor);
+    flex.activationHalo.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), familyNormal(flex.person));
     const startDelta = activeAnchor.clone().sub(basePoints[0]);
     const restEnd = basePoints[basePoints.length - 1].clone();
     let target = null;
