@@ -1,3 +1,4 @@
+import { createTransitLayer } from './transit-layer.js?v=planet-paths-20261109';
 import * as THREE from 'three';
 import '../transit-data.js?family-circle-108-20261019&lifetime-channel-history-v2-20261020';
 import { generatePublicDemoReading } from './public-demo-readings.js?v=lifetime-timeline-20261020';
@@ -98,7 +99,7 @@ const relationshipMutedCharts = new Set();
 const chartInitials = new Map();
 const personLayerSettings = new Map();
 function layersFor(person) {
-  if (!personLayerSettings.has(person)) personLayerSettings.set(person, { design: true, personality: true, transits: true, allChannels: true });
+  if (!personLayerSettings.has(person)) personLayerSettings.set(person, { design: true, personality: true, transits: true, allChannels: true, planets: true });
   return personLayerSettings.get(person);
 }
 let relationshipGroup = null;
@@ -292,7 +293,7 @@ function addChartInitial(person, initial, color) {
   layerControls.className = 'bodygraph-layer-controls';
   layerControls.setAttribute('role', 'group');
   layerControls.setAttribute('aria-label', (window.hdChartNames?.[person] || person) + ' activation layers');
-  for (const [key, title, tint] of [['allChannels', 'All channels', '#888888'], ['design', 'Design', '#ff5968'], ['personality', 'Personality', '#419dff'], ['transits', 'Transits', '#c0c7d2']]) {
+  for (const [key, title, tint] of [['allChannels', 'All channels', '#888888'], ['design', 'Design', '#ff5968'], ['personality', 'Personality', '#419dff'], ['transits', 'Transits', '#c0c7d2'], ['planets', 'Planets', '#dfd8ff']]) {
     const item = document.createElement('label');
     const input = document.createElement('input');
     input.type = 'checkbox';
@@ -2975,6 +2976,7 @@ async function refreshTransits() {
   if (lifetimeTimelineActive) return;
   try {
     transitSnapshot = await window.CastaliaHumanDesignTransit.currentSnapshot();
+    if (sourceDocument && loader) rebuildRelationship();
     try {
       transitDurationEstimates = await window.CastaliaHumanDesignTransit.estimateDurations(transitSnapshot, 240);
     } catch (error) {
@@ -2984,7 +2986,6 @@ async function refreshTransits() {
     const time = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(transitSnapshot.epoch * 1000));
     status.textContent = `As of ${time} · ${transitSnapshot.source}; Sun through Saturn + Earth. Applied per bodygraph; dashed family bridges include transit contributions.`;
     if (!lifetimeTimelineActive && timelineStatus) timelineStatus.textContent = `Current transits · ${time}`;
-    if (sourceDocument && loader) rebuildRelationship();
   } catch (error) {
     status.textContent = `Current transits unavailable: ${error.message}`;
     if (!lifetimeTimelineActive && timelineStatus) timelineStatus.textContent = `Current transit data unavailable: ${error.message}`;
@@ -4208,8 +4209,29 @@ function animate() {
     particle.glow.scale.setScalar(pulse);
     particle.glowMaterial.opacity = 0.2 + pulse * 0.25;
   }
+  transitPlanetLayer.update(transitSnapshot, [...includedFamilyMembers]);
   renderer.render(scene, camera);
   requestAnimationFrame(animate);
 }
+const transitPlanetLayer = createTransitLayer({
+  enabled: person => familyMemberIsVisible(person) && layersFor(person).planets,
+  project: (person, gate) => {
+    const point = currentGatePoints[person]?.get(gate);
+    if (!point) return null;
+    const projected = chartRoot.localToWorld(chartPointInFamily(point, person, 6)).project(camera);
+    const rect = canvas.getBoundingClientRect();
+    const x = rect.left + (projected.x + 1) * rect.width / 2;
+    const y = rect.top + (1 - projected.y) * rect.height / 2;
+    const bottom = document.querySelector('#sceneTipFooter').getBoundingClientRect().top;
+    return projected.z >= -1 && projected.z <= 1 && x >= 0 && x < rect.right - 32 && y > 32 && y < bottom - 30 ? { x, y } : null;
+  },
+  showInfo: (info, key) => {
+    selectedKey = key;
+    hoveredKey = key;
+    applyHighlight(key);
+    renderTip(info);
+    tip.hidden = false;
+  }
+});
 init();
 animate();
