@@ -1,4 +1,4 @@
-import { createTransitLayer } from './transit-layer.js?v=visible-planet-paths-20261109';
+import { createTransitLayer } from './transit-layer.js?v=gradient-planet-paths-20261109';
 import * as THREE from 'three';
 import '../transit-data.js?family-circle-108-20261019&lifetime-channel-history-v2-20261020';
 import { generatePublicDemoReading } from './public-demo-readings.js?v=lifetime-timeline-20261020';

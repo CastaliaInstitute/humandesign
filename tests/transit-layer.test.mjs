@@ -7,6 +7,7 @@ class Element {
   remove() { this.parent.children = this.parent.children.filter(child => child !== this); }
   setAttribute(key, value) { this.attributes[key] = value; }
   addEventListener() {}
+  querySelector(key) { this.mockQueries ||= {}; return this.mockQueries[key] ||= new Element('gradient'); }
 }
 test('automatically draws a path and retains offscreen endpoints', async () => {
   const body = new Element('body');
@@ -26,5 +27,9 @@ test('automatically draws a path and retains offscreen endpoints', async () => {
   assert.equal(paths.length, 2);
   assert.ok(paths[0].attributes.d.startsWith('M-100,100'));
   assert.equal(paths[0].style.display, '');
+  assert.equal(paths[0].attributes.stroke, 'url(#transit-previous-gradient)');
+  assert.equal(paths[1].attributes.stroke, 'url(#transit-next-gradient)');
+  assert.equal(paths[0].attributes['marker-end'], undefined);
+  assert.equal(paths[1].attributes['marker-end'], 'url(#transit-path-arrow)');
   delete globalThis.document; delete globalThis.window;
 });

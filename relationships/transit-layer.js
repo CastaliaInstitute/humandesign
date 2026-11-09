@@ -6,7 +6,11 @@ export function createTransitLayer({ project, enabled, showInfo }) {
   const root = document.createElement('div');
   root.className = 'transit-planet-layer';
   const svg = document.createElementNS(ns, 'svg');
-  svg.innerHTML = '<defs><marker id="transit-path-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 0L10 5L0 10" fill="#dfd8ff"/></marker></defs>';
+  svg.innerHTML = `<defs>
+    <linearGradient id="transit-previous-gradient" gradientUnits="userSpaceOnUse"><stop stop-color="#419dff"/><stop offset="1" stop-color="#c184ff"/></linearGradient>
+    <linearGradient id="transit-next-gradient" gradientUnits="userSpaceOnUse"><stop stop-color="#c184ff"/><stop offset="1" stop-color="#ffd46a"/></linearGradient>
+    <marker id="transit-path-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M0 0L10 5L0 10L3 5Z" fill="#ffd46a"/></marker>
+  </defs>`;
   root.append(svg);
   document.body.append(root);
   let signature = '', selected = null, generation = 0;
@@ -33,7 +37,7 @@ export function createTransitLayer({ project, enabled, showInfo }) {
     if (token !== generation) return;
     const date = epoch => new Date(epoch * 1000).toLocaleString();
     const previous = result.previous, next = result.next;
-    showInfo({ title, detail: `${previous?.gate ?? '?'} → ${current} → ${next?.gate ?? '?'}. As of ${date(snapshot.epoch)}. ${previous ? `Entered from Gate ${previous.gate}: ${date(previous.epoch)}.` : 'Previous gate unavailable in the 240-day search window.'} ${next ? `Next: Gate ${next.gate}, ${date(next.epoch)}.` : 'Next gate unavailable in the 240-day search window.'} Dashed arrows show activation order, not travel through channels.` }, `${person}:gate:${current}`);
+    showInfo({ title, detail: `${previous?.gate ?? '?'} → ${current} → ${next?.gate ?? '?'}. As of ${date(snapshot.epoch)}. ${previous ? `Entered from Gate ${previous.gate}: ${date(previous.epoch)}.` : 'Previous gate unavailable in the 240-day search window.'} ${next ? `Next: Gate ${next.gate}, ${date(next.epoch)}.` : 'Next gate unavailable in the 240-day search window.'} Blue → violet → gold shows previous → current → next activation, not travel through channels.` }, `${person}:gate:${current}`);
     const stops = [[previous?.gate, 'Previous'], [current, 'Current'], [next?.gate, 'Next']];
     for (const [gate, label] of stops) {
       if (gate == null) continue;
@@ -46,7 +50,8 @@ export function createTransitLayer({ project, enabled, showInfo }) {
       if (from == null || to == null) continue;
       const path = document.createElementNS(ns, 'path');
       path.setAttribute('class', 'transit-gate-trail');
-      path.setAttribute('marker-end', 'url(#transit-path-arrow)');
+      path.setAttribute('stroke', `url(#transit-${side < 0 ? 'previous' : 'next'}-gradient)`);
+      if (side > 0) path.setAttribute('marker-end', 'url(#transit-path-arrow)');
       Object.assign(path.dataset, { person, from, to, side });
       svg.append(path); paths.push(path);
     }
@@ -89,7 +94,12 @@ export function createTransitLayer({ project, enabled, showInfo }) {
       path.style.display = a && b ? '' : 'none';
       if (a && b) {
         const dx = b.x - a.x, dy = b.y - a.y, length = Math.max(1, Math.hypot(dx, dy));
-        const bend = Math.min(110, length * .35) * Number(path.dataset.side);
+        // Use the same turn direction so retrograde returns form a loop
+        // instead of drawing both halves on top of each other.
+        const bend = Math.min(110, length * .35);
+        const gradient = svg.querySelector(`#transit-${Number(path.dataset.side) < 0 ? 'previous' : 'next'}-gradient`);
+        gradient.setAttribute('x1', a.x); gradient.setAttribute('y1', a.y);
+        gradient.setAttribute('x2', b.x); gradient.setAttribute('y2', b.y);
         path.setAttribute('d', `M${a.x},${a.y} Q${(a.x+b.x)/2-dy/length*bend},${(a.y+b.y)/2+dx/length*bend} ${b.x},${b.y}`);
       }
     }
