@@ -1,4 +1,4 @@
-import { createTransitLayer } from './transit-layer.js?v=planet-paths-20261109';
+import { createTransitLayer } from './transit-layer.js?v=visible-planet-paths-20261109';
 import * as THREE from 'three';
 import '../transit-data.js?family-circle-108-20261019&lifetime-channel-history-v2-20261020';
 import { generatePublicDemoReading } from './public-demo-readings.js?v=lifetime-timeline-20261020';
@@ -4223,7 +4223,10 @@ const transitPlanetLayer = createTransitLayer({
     const x = rect.left + (projected.x + 1) * rect.width / 2;
     const y = rect.top + (1 - projected.y) * rect.height / 2;
     const bottom = document.querySelector('#sceneTipFooter').getBoundingClientRect().top;
-    return projected.z >= -1 && projected.z <= 1 && x >= 0 && x < rect.right - 32 && y > 32 && y < bottom - 30 ? { x, y } : null;
+    // Keep projected endpoints outside the viewport: clipping the entire path
+    // when either gate is offscreen made transit trails disappear while zooming.
+    if (projected.z < -1 || projected.z > 1) return null;
+    return { x, y, visible: x >= 0 && x < rect.right - 32 && y > 32 && y < bottom - 30 };
   },
   showInfo: (info, key) => {
     selectedKey = key;

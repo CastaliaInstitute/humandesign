@@ -73,11 +73,14 @@ export function createTransitLayer({ project, enabled, showInfo }) {
           root.append(button); buttons.push(button);
         }
       }
-      if (snapshot && selected && visible.includes(selected.person)) void select(selected.person, selected.planet, snapshot);
+      if (snapshot && visible.length) {
+        if (!selected || !visible.includes(selected.person)) selected = { person: visible[0], planet: 'sun' };
+        void select(selected.person, selected.planet, snapshot);
+      }
     }
     for (const button of buttons) {
       const point = project(button.dataset.person, +button.dataset.gate);
-      button.hidden = !point;
+      button.hidden = !point || !point.visible;
       if (point) button.style.transform = `translate(${point.x + 7 + Number(button.dataset.slot) * 29}px,${point.y - 32}px)`;
       button.classList.toggle('selected', selected?.person === button.dataset.person && selected?.planet === button.dataset.planet);
     }
@@ -92,7 +95,7 @@ export function createTransitLayer({ project, enabled, showInfo }) {
     }
     labels.forEach((label, index) => {
       const point = project(label.dataset.person, +label.dataset.gate);
-      label.style.display = point ? '' : 'none';
+      label.style.display = point?.visible ? '' : 'none';
       if (point) { label.setAttribute('x', point.x + 8); label.setAttribute('y', point.y + 15 + (index === 2 ? 12 : 0)); }
     });
   }
