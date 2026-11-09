@@ -1,4 +1,4 @@
-import { createTransitLayer } from './transit-layer.js?v=gradient-planet-paths-20261109';
+import { createTransitLayer } from './transit-layer.js?v=lifetime-planet-paths-20261109';
 import * as THREE from 'three';
 import '../transit-data.js?family-circle-108-20261019&lifetime-channel-history-v2-20261020';
 import { generatePublicDemoReading } from './public-demo-readings.js?v=lifetime-timeline-20261020';
@@ -2901,6 +2901,7 @@ function rebuildRelationship() {
   relationshipGroup.userData.bridgeCount = formedChannels.size;
   relationshipGroup.visible = document.querySelector('#showBridges').checked;
   fitCameraToFamily();
+  syncTimelinePeople();
   frontFamilyReading();
   const pairNames = overlapPairs.map(pair => pair.map(person => window.hdChartNames?.[person] || (person === 'daniel' ? 'Person 1' : person === 'camille' ? 'Person 2' : 'Child')).join('–'));
   setStatus(`${relationshipGroup.userData.bridgeCount} relationship channel bridge${relationshipGroup.userData.bridgeCount === 1 ? '' : 's'} within reach${pairNames.length ? ` (${pairNames.join(', ')})` : ''}.`);
@@ -2992,6 +2993,26 @@ async function refreshTransits() {
   }
 }
 
+const timelinePerson = document.querySelector('#timelinePerson');
+const timelinePlanet = document.querySelector('#timelinePlanet');
+let timelineAnchorPerson = null;
+function birthEpochForPerson(person) {
+  const value = window.hdFamilyBirthEpochs?.[person] ?? familyChildren.find(child => child.id === person)?.birthEpoch;
+  return value == null ? NaN : Number(value);
+}
+function syncTimelinePeople() {
+  const people = [...includedFamilyMembers].filter(person => Number.isFinite(birthEpochForPerson(person)));
+  const previous = timelinePerson.value;
+  timelinePerson.replaceChildren(...people.map(person => {
+    const option = document.createElement('option'); option.value = person;
+    option.textContent = window.hdChartNames?.[person] || person;
+    return option;
+  }));
+  timelinePerson.value = people.includes(previous) ? previous : people[0] || '';
+  if (timelinePerson.value && timelinePerson.value !== timelineAnchorPerson) {
+    setTimelineAnchor({ person: timelinePerson.value, name: window.hdChartNames?.[timelinePerson.value], birthEpoch: birthEpochForPerson(timelinePerson.value) });
+  }
+}
 const timelineSlider = document.querySelector('#timelineAgeSlider');
 const timelineDateTime = document.querySelector('#timelineDateTime');
 const timelineAgeOutput = document.querySelector('#timelineAge');
@@ -3031,9 +3052,9 @@ function updateTimelineDisplay(epoch) {
     const years = (boundedEpoch - birthEpoch) / (365.2425 * 86400);
     return years < 0 ? `${name}: not born` : `${name}: ${years.toFixed(1)}`;
   });
-  const anchorName = window.hdTimelineAnchor?.name || 'Blue chart';
+  const anchorName = window.hdChartNames?.[timelineAnchorPerson] || timelineAnchorPerson || 'Selected chart';
   timelineFamilyAges.textContent = `${anchorName}'s 0–100 lifetime${ages.length ? ` · ${ages.join(' · ')}` : ''}`;
-  timelineNowButton.disabled = Date.now() < lifetimeStartEpoch || Date.now() > lifetimeEndEpoch;
+  timelineNowButton.disabled = Date.now() / 1000 < lifetimeStartEpoch || Date.now() / 1000 > lifetimeEndEpoch;
 }
 
 let timelineSnapshotPending = false;
@@ -3041,6 +3062,7 @@ let queuedTimelineEpoch = null;
 async function showTimelineTransits(epoch) {
   if (!window.CastaliaHumanDesignTransit?.snapshotAt) return;
   if (timelineSnapshotPending) {
+    timelineRequestId += 1;
     queuedTimelineEpoch = epoch;
     return;
   }
@@ -3077,6 +3099,8 @@ async function showTimelineTransits(epoch) {
 function selectTimelineEpoch(epoch, immediate = false) {
   if (!Number.isFinite(lifetimeStartEpoch) || !Number.isFinite(lifetimeEndEpoch)) return;
   const boundedEpoch = Math.min(lifetimeEndEpoch, Math.max(lifetimeStartEpoch, epoch));
+  timelineRequestId += 1;
+  queuedTimelineEpoch = null;
   updateTimelineDisplay(boundedEpoch);
   lifetimeTimelineActive = Math.abs(boundedEpoch - Date.now() / 1000) > 60;
   if (timelineDebounceTimer) clearTimeout(timelineDebounceTimer);
@@ -3113,11 +3137,13 @@ function playTimelineFrame(now) {
 }
 
 function setTimelineAnchor(anchor) {
-  const birthEpoch = Number(anchor?.birthEpoch);
+  const birthEpoch = anchor?.birthEpoch == null ? NaN : Number(anchor.birthEpoch);
   if (!Number.isFinite(birthEpoch)) return;
   pauseTimeline();
   timelineRequestId += 1;
   queuedTimelineEpoch = null;
+  timelineAnchorPerson = anchor.person || 'daniel';
+  timelinePerson.value = timelineAnchorPerson;
   lifetimeStartEpoch = birthEpoch;
   const end = new Date(birthEpoch * 1000);
   end.setUTCFullYear(end.getUTCFullYear() + 100);
@@ -3131,7 +3157,7 @@ function setTimelineAnchor(anchor) {
   updateTimelineDisplay(initialEpoch);
   lifetimeTimelineActive = false;
   if (Math.abs(initialEpoch - current) > 60) void showTimelineTransits(initialEpoch);
-  else timelineStatus.textContent = 'Current transits · use the slider to explore this 100-year timeline.';
+  else timelineStatus.textContent = 'Drag through ages 0–100. Play samples monthly; use the date field for closer inspection.';
 }
 
 timelineSlider.addEventListener('input', () => selectTimelineEpoch(timelineEpochAtAge(Number(timelineSlider.value))));
@@ -3150,6 +3176,7 @@ timelineBirthButton.addEventListener('click', () => {
 });
 timelineNowButton.addEventListener('click', () => {
   pauseTimeline();
+  clearTimeout(timelineDebounceTimer);
   timelineRequestId += 1;
   queuedTimelineEpoch = null;
   lifetimeTimelineActive = false;
@@ -3177,7 +3204,22 @@ timelinePlayButton.addEventListener('click', () => {
   timelinePlayButton.setAttribute('aria-pressed', 'true');
   timelinePlaybackFrame = requestAnimationFrame(playTimelineFrame);
 });
-window.addEventListener('castalia-timeline-anchor-updated', event => setTimelineAnchor(event.detail));
+timelinePerson.addEventListener('change', () => {
+  const person = timelinePerson.value;
+  setTimelineAnchor({ person, birthEpoch: birthEpochForPerson(person) });
+  transitPlanetLayer.choose(person, timelinePlanet.value, transitSnapshot);
+});
+timelinePlanet.addEventListener('change', () => {
+  const person = timelinePerson.value || [...includedFamilyMembers][0];
+  layersFor(person).planets = true;
+  transitPlanetLayer.choose(person, timelinePlanet.value, transitSnapshot);
+});
+window.addEventListener('castalia-transit-planet-selected', event => {
+  timelinePlanet.value = event.detail.planet;
+  const person = event.detail.person;
+  if (person !== timelineAnchorPerson && Number.isFinite(birthEpochForPerson(person))) setTimelineAnchor({ person, birthEpoch: birthEpochForPerson(person) });
+});
+window.addEventListener('castalia-timeline-anchor-updated', () => syncTimelinePeople());
 if (window.hdTimelineAnchor) setTimelineAnchor(window.hdTimelineAnchor);
 
 function resize() {

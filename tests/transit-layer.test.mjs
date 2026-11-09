@@ -13,7 +13,7 @@ test('automatically draws a path and retains offscreen endpoints', async () => {
   const body = new Element('body');
   globalThis.document = { body, createElement: tag => new Element(tag), createElementNS: (_, tag) => new Element(tag) };
   const epoch = 1800000000;
-  globalThis.window = { CastaliaHumanDesignTransit: {
+  globalThis.window = { dispatchEvent() {}, CastaliaHumanDesignTransit: {
     gateAt: value => value,
     snapshotAt: async date => ({ bodies: { sun: date.getTime()/1000 < epoch-86400 ? 1 : date.getTime()/1000 > epoch+86400 ? 3 : 2 } })
   }};

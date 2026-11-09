@@ -23,6 +23,7 @@ export function createTransitLayer({ project, enabled, showInfo }) {
   async function select(person, planet, snapshot) {
     const token = ++generation;
     selected = { person, planet };
+    window.dispatchEvent(new CustomEvent('castalia-transit-planet-selected', { detail: selected }));
     clearPath();
     const api = window.CastaliaHumanDesignTransit;
     const current = api.gateAt(snapshot.bodies[planet]);
@@ -109,5 +110,5 @@ export function createTransitLayer({ project, enabled, showInfo }) {
       if (point) { label.setAttribute('x', point.x + 8); label.setAttribute('y', point.y + 15 + (index === 2 ? 12 : 0)); }
     });
   }
-  return { update };
+  return { update, choose: (person, planet, snapshot) => { if (snapshot) void select(person, planet, snapshot); } };
 }
